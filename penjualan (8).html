@@ -21,6 +21,27 @@
 :where(code, pre, kbd, samp) {
   font-family: "Optimistic Mono", ui-monospace, monospace;
 }
+</style><style>
+@font-face {
+  font-family: "Optimistic";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Optimistic Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
+}
+:where(html) {
+  font-family: "Optimistic", system-ui, sans-serif;
+}
+:where(code, pre, kbd, samp) {
+  font-family: "Optimistic Mono", ui-monospace, monospace;
+}
 </style>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -119,7 +140,7 @@ header{
   position:sticky;
   top:0;
   z-index:100;
-  border-bottom:2px solid #000 !important;
+  border-bottom:3px solid #ffc107 !important;
   box-shadow:0 3px 0 #000 !important;
 }
 
@@ -573,6 +594,8 @@ body.dark #konterAlertModal div[style*="background:#111827"]{
 /* =========================
    PRINT
    ========================= */
+.template-cetak-btn.active{border-color:#ffc107 !important;background:#fffaf0 !important;box-shadow:2px 2px 0 #111827 !important}
+
 @media print{
   header,
   .no-print{
@@ -592,7 +615,7 @@ body.dark #konterAlertModal div[style*="background:#111827"]{
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, serverTimestamp, writeBatch, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",
@@ -608,59 +631,83 @@ const db = getFirestore(app);
 
 let currentUser=null, ownerUid=null, isOwner=false, allProduk=[], konterName="", karyawanList=[], rincianItems=[];
 
-onAuthStateChanged(auth, async u=>{
-  if(!u){ location.href="login.html"; return; }
-  currentUser=u;
-  document.getElementById('akunSide').textContent=u.email;
-  document.getElementById('namaToko').textContent='Input Penjualan';
-  document.getElementById('akunLoginField').value=u.email;
-  try{
-    const snap=await getDocs(query(collection(db,"users"), where("__name__","==", u.uid)));
-    let p=null;
-    if(!snap.empty) p=snap.docs[0].data();
-    else{ const d=await getDoc(doc(db,"users",u.uid)); if(d.exists()) p=d.data(); }
-    if(!p){
-      ownerUid=u.uid; isOwner=true;
-      konterName="Fixzy - A Yudi Thea";
-      document.getElementById('roleSide').textContent='OWNER';
-      document.getElementById('roleSide').style.background='#16a34a';
-    }else{
-      const roleNow=String(p.role||'').toLowerCase().trim();
-      isOwner = roleNow==='owner' || p.isOwner===true;
+// =========================================================
+// SESI AKUN — ACUAN servisan.html
+// businessUid adalah pemisah data utama:
+// OWNER      -> UID akun sendiri
+// SUPERADMIN -> TIDAK BOLEH masuk transaksi bisnis
+// KARYAWAN   -> ownerUid/ownerId pada profil karyawan
+// =========================================================
+function roleNorm(v){return String(v||"").trim().toLowerCase();}
+function resolveBusinessUid(profile,user){
+  const role=roleNorm(profile?.role);
+  if(role==="owner" || profile?.isOwner===true){
+    return String(user.uid||"").trim();
+  }
+  if(role==="superadmin" || role==="super_admin") return "";
+  return String(profile?.ownerUid||profile?.ownerId||"").trim();
+}
 
-      // OWNER dan SUPERADMIN memakai UID akun sendiri.
-      // Role lain mengikuti Owner yang menaunginya.
-      if(roleNow==='superadmin'){
-        ownerUid=u.uid;
-      }else if(isOwner){
-        ownerUid=u.uid;
-      }else{
-        ownerUid=String(p.ownerUid||p.ownerId||'').trim() || u.uid;
-      }
-      if(isOwner){
-        konterName = p.namaKonter || p.namaToko || p.tokoName || p.namaKonterToko || p.konter || p.storeName || p.displayName || p.nama || p.name || p.username || "Fixzy - A Yudi Thea";
-      }else{
-        try{
-          const ownerSnap = await getDoc(doc(db,"users", ownerUid));
-          if(ownerSnap.exists()){
-            const op = ownerSnap.data();
-            konterName = op.namaKonter || op.namaToko || op.tokoName || op.namaKonterToko || op.konter || op.storeName || op.displayName || op.nama || op.name || op.username || "Fixzy - A Yudi Thea";
-          }else{
-            konterName = p.namaKonter || p.namaToko || p.nama || "Fixzy - A Yudi Thea";
-          }
-        }catch(e){
-          konterName = p.namaKonter || p.namaToko || p.nama || "Fixzy - A Yudi Thea";
-        }
-      }
-      document.getElementById('roleSide').textContent=isOwner?'OWNER':(p.role||'KARYAWAN').toUpperCase();
-      document.getElementById('roleSide').style.background=isOwner?'#16a34a':'#2563eb';
+onAuthStateChanged(auth, async u=>{
+  const akun=document.getElementById('akunSide');
+  const roleEl=document.getElementById('roleSide');
+  if(!u){ location.replace("login.html"); return; }
+
+  currentUser=u;
+  if(akun) akun.textContent=u.email||"Akun aktif";
+
+  try{
+    const d=await getDoc(doc(db,"users",u.uid));
+    if(!d.exists()) throw new Error("Profil akun tidak ditemukan di users/"+u.uid);
+
+    const p=d.data()||{};
+    const role=roleNorm(p.role);
+    const email=String(u.email||"").trim().toLowerCase();
+    const superAdmin=(role==="superadmin"||role==="super_admin"||email==="servicehpmaja@gmail.com");
+
+    if(superAdmin){
+      throw new Error("SUPERADMIN hanya mengelola sistem dan tidak boleh mengakses data bisnis Owner.");
     }
-  }catch(e){ ownerUid=u.uid; isOwner=true; konterName="Fixzy - A Yudi Thea"; }
-  document.getElementById('konterField').value=konterName;
-  document.getElementById('tanggalField').valueAsDate=new Date();
-  autoGenerateNotaBarcode();
-  await loadKaryawan();
-  await loadProduk();
+    if(!["owner","employee","karyawan"].includes(role)){
+      throw new Error("Akun tidak memiliki akses input penjualan.");
+    }
+
+    isOwner=(role==="owner" || p.isOwner===true);
+    ownerUid=resolveBusinessUid(p,u);
+    if(!ownerUid) throw new Error("Identitas owner akun tidak ditemukan.");
+
+    currentUser.profileRole=superAdmin?"superadmin":role;
+    currentUser.ownerUid=p.ownerUid||"";
+    currentUser.ownerId=p.ownerId||"";
+    currentUser.businessOwnerUid=ownerUid;
+    currentUser.isOwner=isOwner;
+
+    // Owner memakai profil sendiri. Karyawan memakai ownerUid/ownerId dari profilnya.
+    if(isOwner){
+      konterName=p.namaKonter||p.namaToko||p.tokoName||p.namaKonterToko||p.konter||p.storeName||p.displayName||p.nama||p.name||p.username||"Fixzy - A Yudi Thea";
+    }else{
+      konterName=p.namaKonter||p.namaToko||p.tokoName||p.namaKonterToko||p.konter||p.storeName||p.displayName||p.nama||p.name||p.username||"Fixzy - A Yudi Thea";
+    }
+
+    document.getElementById('namaToko').textContent='Input Penjualan';
+    document.getElementById('akunLoginField').value=u.email||'';
+    if(roleEl){
+      roleEl.textContent=superAdmin?'SUPERADMIN':role.toUpperCase();
+      roleEl.style.background=superAdmin?'#7c3aed':(isOwner?'#16a34a':'#2563eb');
+    }
+    document.getElementById('konterField').value=konterName;
+    document.getElementById('tanggalField').valueAsDate=new Date();
+    autoGenerateNotaBarcode();
+
+    try{ await loadKaryawan(); }catch(e){ console.warn('LOAD KARYAWAN:',e); }
+    try{ await loadProduk(); }catch(e){ console.error('LOAD PRODUK:',e); }
+  }catch(e){
+    console.error('FIXZY SESSION:',e);
+    if(akun) akun.textContent=u.email||'Akun tidak dikenal';
+    if(roleEl){ roleEl.textContent='AKSES DITOLAK'; roleEl.style.background='#dc2626'; }
+    document.getElementById('konterField').value='';
+    document.getElementById('produkInfo').textContent=e.message||'Gagal memuat akun.';
+  }
 });
 
 async function loadKaryawan(){
@@ -788,72 +835,75 @@ window.fixStokSinkron=async()=>{
 };
 
 
+function activeStockOwner(){
+  const role=roleNorm(currentUser?.profileRole||currentUser?.role||"");
+  // PERSIS pola servisan:
+  // Owner/Superadmin -> UID sendiri
+  // Karyawan -> businessOwnerUid yang berasal dari ownerUid/ownerId profil
+  if(role==="owner" || currentUser?.isOwner===true){
+    return String(currentUser?.uid||"").trim();
+  }
+  if(role==="superadmin" || role==="super_admin") return "";
+  return String(currentUser?.businessOwnerUid||currentUser?.ownerUid||currentUser?.ownerId||"").trim();
+}
+
 async function loadProduk(){
-  try{
-    const docs=[];
-    const col="stok";
-    const owner=String(ownerUid||"").trim();
-    if(!owner) throw new Error("Owner UID belum tersedia.");
+  allProduk=[];
+  const businessUid=activeStockOwner();
+  if(!businessUid) throw new Error("Identitas owner akun aktif tidak ditemukan.");
 
-    // Hanya ambil stok akun aktif. Tidak ada fallback getDocs(collection("stok")).
-    for(const field of ["ownerUid","ownerId","uid"]){
-      try{
-        const snap=await getDocs(query(collection(db,col),where(field,"==",owner)));
-        snap.forEach(d=>{
-          const data=d.data()||{};
-          const dataOwner=String(data.ownerUid||data.ownerId||data.uid||"").trim();
-          if(!dataOwner || dataOwner!==owner) return;
-          if(docs.some(x=>x.id===d.id)) return;
+  const docsById=new Map();
 
-          const stokVal=Number(
-            data.sisa ?? data.sisaStok ?? data.stokTersedia ?? data.stokAkhir ??
-            data.pcs ?? data.ready ?? data.stok ?? data.qty ?? data.jumlah ?? data.stock ?? 0
-          )||0;
+  // ACUAN servisan.html:
+  // hanya query ownerUid / ownerId.
+  // Superadmin juga boleh membaca stok dengan uid miliknya sendiri.
+  const queries=[
+    query(collection(db,"stok"),where("ownerUid","==",businessUid)),
+    query(collection(db,"stok"),where("ownerId","==",businessUid))
+  ];
+  for(const q of queries){
+    try{
+      const snap=await getDocs(q);
+      snap.forEach(d=>{
+        const data=d.data()||{};
+        // Filter kedua untuk memastikan dokumen benar-benar milik businessUid.
+        const owner=String(data.ownerUid||data.ownerId||"").trim();
+        if(owner!==businessUid) return;
 
-          docs.push({id:d.id,_col:col,_stok:stokVal,_rawSisa:data.sisa,_rawStok:data.stok,...data});
-        });
-      }catch(e){
-        console.warn("load stok "+field,e);
-      }
+        const stokVal=Number(data.sisa??data.sisaStok??data.stokTersedia??data.stokAkhir??data.pcs??data.ready??data.stok??data.qty??data.jumlah??data.stock??0)||0;
+        docsById.set(d.id,{id:d.id,_col:"stok",_stok:stokVal,...data});
+      });
+    }catch(e){
+      console.warn("loadProduk query error:",e);
     }
+  }
 
-    const mapByKey=new Map();
-    for(const p of docs){
-      const key=String(p.barcode||p.kode||p.sku||p.nama||p.namaProduk||p.name||p.id)
-        .trim().toLowerCase();
-      if(!key) continue;
-      const existing=mapByKey.get(key);
-      if(!existing){
-        mapByKey.set(key,p);
-      }else{
-        const pt=Date.parse(p.updatedAt||p.createdAt||0)||0;
-        const et=Date.parse(existing.updatedAt||existing.createdAt||0)||0;
-        if(pt>et) mapByKey.set(key,p);
-      }
-    }
+  // Deduplicate produk berdasarkan barcode/kode/nama.
+  const mapByProduct=new Map();
+  for(const p of docsById.values()){
+    const key=String(p.barcode||p.kode||p.sku||p.nama||p.namaProduk||p.name||p.id).trim().toLowerCase();
+    if(!key) continue;
+    const old=mapByProduct.get(key);
+    if(!old){ mapByProduct.set(key,p); continue; }
+    const pt=p.updatedAt?.toDate?p.updatedAt.toDate().getTime():new Date(p.updatedAt||p.createdAt||0).getTime();
+    const ot=old.updatedAt?.toDate?old.updatedAt.toDate().getTime():new Date(old.updatedAt||old.createdAt||0).getTime();
+    if(Number(p._stok)>Number(old._stok) || pt>ot) mapByProduct.set(key,p);
+  }
 
-    allProduk=Array.from(mapByKey.values()).filter(p=>{
-      return String(p.ownerUid||p.ownerId||p.uid||"").trim()===owner;
-    });
-
-    const info=document.getElementById('produkInfo');
-    if(allProduk.length===0){
-      info.textContent='Stok akun ini kosong - mode manual aktif';
-      document.getElementById('autoProdukWrap').style.opacity='0.35';
-      document.getElementById('autoProdukWrap').style.pointerEvents='none';
-      document.getElementById('manualToggle').checked=true;
-      toggleManual();
-    }else{
-      const totalStok=allProduk.reduce((s,d)=>s+Number(d._stok||0),0);
-      const habis=allProduk.filter(d=>Number(d._stok||0)<=0).length;
-      info.textContent=`${allProduk.length} produk - Total stok: ${totalStok} - Habis: ${habis}`;
-      document.getElementById('autoProdukWrap').style.opacity='1';
-      document.getElementById('autoProdukWrap').style.pointerEvents='auto';
-    }
-  }catch(e){
-    console.error("loadProduk error",e);
-    allProduk=[];
-    document.getElementById('produkInfo').textContent='Gagal memuat stok akun ini';
+  allProduk=[...mapByProduct.values()];
+  const info=document.getElementById('produkInfo');
+  if(allProduk.length===0){
+    if(info) info.textContent='Belum ada stok untuk akun/owner ini.';
+    document.getElementById('autoProdukWrap').style.opacity='0.35';
+    document.getElementById('autoProdukWrap').style.pointerEvents='none';
+    document.getElementById('manualToggle').checked=true;
+    toggleManual();
+  }else{
+    const totalStok=allProduk.reduce((sum,d)=>sum+Number(d._stok||0),0);
+    const habis=allProduk.filter(d=>Number(d._stok||0)<=0).length;
+    if(info) info.textContent=`${allProduk.length} produk - Total stok: ${totalStok} - Habis: ${habis}`;
+    document.getElementById('autoProdukWrap').style.opacity='1';
+    document.getElementById('autoProdukWrap').style.pointerEvents='auto';
   }
 }
 
@@ -902,8 +952,8 @@ function showProdukDropdown(list){
       if(!prod) return;
       const stok=Number(prod._stok ?? prod.sisa ?? prod.stok ?? 0);
       if(stok<=0){
-        showKonterPopup(`Stok ${prod.nama||prod.kode} habis. Tidak bisa dijual. | Konter: ${konterName}`, 'error');
-        return;
+        // Tetap izinkan, cuma konfirmasi native (biar gak crash)
+        if(!confirm(`Stok ${prod.nama||prod.kode} habis (sisa ${stok}). Tetap jual?`)) return;
       }
       selectProdukAuto(prod);
       dd.classList.remove('show');
@@ -976,19 +1026,8 @@ window.tambahProduk=()=>{
     const prodId=document.getElementById('produkNamaAuto').getAttribute('data-id')||'';
     const prodCol=document.getElementById('produkNamaAuto').getAttribute('data-col')||'stok';
     if(qty<=0){ showKonterPopup('Qty wajib >0 | Konter: ' + konterName, 'error'); return; }
-    const qtySebelumnya=rincianItems
-      .filter(x=>x.type==='auto' && String(x.productId||'')===String(prodId))
-      .reduce((s,x)=>s+Number(x.qty||0),0);
-    if(qty<=0){
-      showKonterPopup('Qty wajib >0 | Konter: ' + konterName, 'error');
-      return;
-    }
-    if(stok<=0){
-      showKonterPopup(`Stok ${nama} habis. Tidak bisa dijual. | Konter: ${konterName}`, 'error');
-      return;
-    }
-    if(qtySebelumnya+qty>stok){
-      showKonterPopup(`Stok tidak cukup! Stok: ${stok}, sudah dipilih: ${qtySebelumnya}, minta tambahan: ${qty}. | Konter: ${konterName}`, 'error');
+    if(stok>0 && qty>stok){
+      showKonterPopup(`Stok tidak cukup! Stok: ${stok}, minta: ${qty}. | Konter: ${konterName}`, 'error');
       return;
     }
     if(stok<=0){
@@ -1067,17 +1106,9 @@ window.batalInput=()=>{
 }
 
 async function simpanData(cetakMode){
-  if(rincianItems.length===0){
-    showKonterPopup('Rincian produk kosong - tambah produk dulu di Header 3 & 4 | Konter: ' + konterName, 'error');
-    return;
-  }
-
+  if(rincianItems.length===0){ showKonterPopup('Rincian produk kosong - tambah produk dulu di Header 3 & 4 | Konter: ' + konterName, 'error'); return; }
   const namaPelanggan=document.getElementById('namaPelangganField').value.trim();
-  if(!namaPelanggan){
-    showKonterPopup('Nama pelanggan wajib (Header 2) | Konter: ' + konterName, 'error');
-    return;
-  }
-
+  if(!namaPelanggan){ showKonterPopup('Nama pelanggan wajib (Header 2) | Konter: ' + konterName, 'error'); return; }
   const total=Number(document.getElementById('totalField').value||0);
   const diskon=Number(document.getElementById('diskonField').value||0);
   const dp=Number(document.getElementById('dpField').value||0);
@@ -1085,199 +1116,200 @@ async function simpanData(cetakMode){
   const status=document.getElementById('statusField').value;
   const teknisiNama=document.getElementById('teknisiSelect').selectedOptions[0]?.getAttribute('data-nama') || document.getElementById('teknisiSelect').value || '';
   const teknisiEmail=document.getElementById('teknisiSelect').selectedOptions[0]?.getAttribute('data-email') || currentUser.email;
-
+  const teknisiValue=teknisiNama;
   try{
-    const grouped=new Map();
-    for(const it of rincianItems){
-      if(it.type!=='auto') continue;
-      const key=String(it.productId||it.barcode||it.nama||'').trim();
-      if(!key) throw new Error(`Produk ${it.nama||'-'} tidak memiliki ID stok.`);
-      if(!grouped.has(key)) grouped.set(key,{...it,qty:0});
-      grouped.get(key).qty += Number(it.qty||0);
-    }
-
-    // =========================================================
-    // SIMPAN PENJUALAN + CEK/PENGURANGAN STOK SECARA ATOMIK
-    // =========================================================
-    // Semua pengecekan dan perubahan stok dilakukan di dalam
-    // Firestore transaction. Jadi stok 1 tidak dapat terjual 2x
-    // karena dua proses membaca stok lama secara bersamaan.
-    const stockUpdateLogs = [];
-    const docRef = doc(collection(db,'penjualan'));
-
-    await runTransaction(db, async (transaction) => {
-
-      const stockChecks = [];
-
-      // Ambil stok TERBARU langsung dari Firebase.
-      for(const g of grouped.values()){
-
-        if(!g.productId){
-          throw new Error(`Produk "${g.nama||'-'}" tidak memiliki ID stok.`);
-        }
-
-        const stockRef = doc(db,'stok',g.productId);
-        const stockSnap = await transaction.get(stockRef);
-
-        if(!stockSnap.exists()){
-          throw new Error(`Produk "${g.nama}" tidak ditemukan pada stok akun ini.`);
-        }
-
-        const stockData = stockSnap.data() || {};
-        const stockOwner = String(
-          stockData.ownerUid || stockData.ownerId || stockData.uid || ''
-        ).trim();
-
-        if(!stockOwner || stockOwner !== String(ownerUid).trim()){
-          throw new Error(
-            `Produk "${g.nama}" bukan milik akun yang sedang login.`
-          );
-        }
-
-        const stokSekarang = Number(
-          stockData.sisa ??
-          stockData.sisaStok ??
-          stockData.stokTersedia ??
-          stockData.stokAkhir ??
-          stockData.pcs ??
-          stockData.ready ??
-          stockData.stok ??
-          stockData.qty ??
-          stockData.jumlah ??
-          stockData.stock ??
-          0
-        ) || 0;
-
-        if(g.qty <= 0){
-          throw new Error(`Qty produk "${g.nama}" harus lebih dari 0.`);
-        }
-
-        if(g.qty > stokSekarang){
-          throw new Error(
-            `Stok ${g.nama} hanya ${stokSekarang}. ` +
-            `Jumlah yang diminta ${g.qty}. Transaksi ditolak.`
-          );
-        }
-
-        stockChecks.push({
-          g,
-          ref: stockRef,
-          data: stockData,
-          stok: stokSekarang
-        });
-      }
-
-      // Buat nota penjualan di transaction yang sama.
-      transaction.set(docRef,{
-        akun:document.getElementById('akunLoginField').value,
-        akunLogin:document.getElementById('akunLoginField').value,
-        namaKonter:konterName,
-        konter:document.getElementById('konterField').value,
-        teknisi:teknisiNama,
-        teknisiEmail:teknisiEmail,
-        namaKaryawan:teknisiNama,
-        tanggal:document.getElementById('tanggalField').value,
-        nomorNota:document.getElementById('notaField').value,
-        barcode:document.getElementById('barcodeField').value,
-        pelanggan:{
-          nama:namaPelanggan,
-          wa:document.getElementById('waField').value,
-          alamat:document.getElementById('alamatField').value
-        },
-        nama:namaPelanggan,
-        noHp:document.getElementById('waField').value,
-        alamat:document.getElementById('alamatField').value,
-        items:rincianItems,
-        namaProduk:rincianItems.map(it=>it.nama).join(', '),
-        produk:rincianItems.map(it=>it.nama).join(', '),
-        total,diskon,dp,sisa,
-        jumlahTotal:total,
-        modal:rincianItems.reduce(
-          (sum,it)=>sum+Number(it.modal||it.harga||0)*Number(it.qty||1),0
-        ),
-        pendapatan:status==='batal'?0:
-          (status==='tunai'
-            ? Math.max(0,total-diskon)
-            : Math.min(Math.max(0,dp),Math.max(0,total-diskon))),
-        status,
-        createdBy:currentUser.email,
-        uid:ownerUid,
-        ownerId:ownerUid,
-        ownerUid:ownerUid,
-        stokDikurangi:status!=='batal',
-        stokDikembalikan:false,
-        createdAt:serverTimestamp(),
-        updatedAt:serverTimestamp()
-      });
-
-      // Status BATAL: jangan kurangi stok.
-      // Status lain: kurangi stok atomik.
-      if(status !== 'batal'){
-        for(const x of stockChecks){
-          const baru = x.stok - x.g.qty;
-
-          transaction.update(x.ref,{
-            sisa:baru,
-            sisaStok:baru,
-            stokTersedia:baru,
-            stokAkhir:baru,
-            stokSisa:baru,
-            pcs:baru,
-            ready:baru,
-            stok:baru,
-            qty:baru,
-            jumlah:baru,
-            stock:baru,
-            statusStok:baru<=0?'KOSONG':'READY',
-            status:baru<=0?'KOSONG':'READY',
-            updatedAt:serverTimestamp(),
-            lastSoldAt:serverTimestamp(),
-            lastSoldQty:x.g.qty
-          });
-
-          stockUpdateLogs.push(
-            `${x.g.nama}: ${x.stok} - ${x.g.qty} = ${baru}`
-          );
-        }
-      }
+    const docRef=await addDoc(collection(db,"penjualan"), {
+      akun:document.getElementById('akunLoginField').value,
+      akunLogin:document.getElementById('akunLoginField').value,
+      namaKonter:konterName,
+      konter:document.getElementById('konterField').value,
+      teknisi:teknisiValue,
+      teknisiEmail:teknisiEmail,
+      namaKaryawan:teknisiValue,
+      tanggal:document.getElementById('tanggalField').value,
+      nomorNota:document.getElementById('notaField').value,
+      barcode:document.getElementById('barcodeField').value,
+      pelanggan:{ nama:namaPelanggan, wa:document.getElementById('waField').value, alamat:document.getElementById('alamatField').value },
+      nama:namaPelanggan,
+      noHp:document.getElementById('waField').value,
+      alamat:document.getElementById('alamatField').value,
+      items:rincianItems,
+      namaProduk:rincianItems.map(it=>it.nama).join(', '),
+      produk:rincianItems.map(it=>it.nama).join(', '),
+      total:total,
+      diskon:diskon,
+      dp:dp,
+      sisa:sisa,
+      jumlahTotal:total,
+      modal:rincianItems.reduce((s,it)=>s+Number(it.modal||it.harga||0)*Number(it.qty||1),0),
+      pendapatan:total - rincianItems.reduce((s,it)=>s+Number(it.modal||it.harga||0)*Number(it.qty||1),0),
+      status:status,
+      createdBy:currentUser.email,
+      uid:ownerUid,
+      ownerId:ownerUid,
+      businessUid:ownerUid,
+      uid:ownerUid,
+      ownerId:ownerUid,
+      ownerId:ownerUid,
+      businessUid:ownerUid,
+      uid:ownerUid,
+      ownerUid:ownerUid,
+      ownerId:ownerUid,
+      businessUid:ownerUid,
+      uid:ownerUid,
+      createdAt:serverTimestamp(),
+      updatedAt:new Date().toISOString()
     });
-
-    const stockMsg=stockUpdateLogs.length
-      ? '\n\nStock dikurangi:\n'+stockUpdateLogs.join('\n')
-      : '\n\nStatus BATAL: stok tidak dikurangi.';
-
-    if(cetakMode){
-      openCetakPopup(docRef.id,cetakMode);
-    }else{
-      showKonterPopup(
-        'Berhasil simpan! Nota: '+document.getElementById('notaField').value+
-        stockMsg+' | Konter: '+konterName,'success'
-      );
-      setTimeout(()=>{location.href='data-penjualan.html';},1500);
+    let stockUpdateLogs=[];
+    // FIX: Gabung qty produk yang sama dulu (A53 1 + A53 1 = 2) baru potong 1x
+    // Biar kalau tambah 1 + tambah 1 lagi produk sama, kepotong 2 bukan 1
+    const grouped = new Map();
+    for(let it of rincianItems){
+      if(it.type!=='auto') continue;
+      const key = (it.productId||'') + '|' + (it.barcode||'') + '|' + (it.nama||'').toLowerCase().trim();
+      if(!grouped.has(key)){
+        grouped.set(key, { ...it, qty: Number(it.qty||0), keys: [key] });
+      }else{
+        const g = grouped.get(key);
+        g.qty += Number(it.qty||0);
+      }
     }
-  }catch(err){
-    console.error(err);
-    showKonterPopup('Gagal simpan: '+err.message+' | Konter: '+konterName,'error');
-  }
+
+    for(let [groupKey, g] of grouped.entries()){
+      try{
+        const colName = "stok";
+        let targetDocId = g.productId || null;
+        let targetRef = null;
+        let oldData = null;
+        let oldStok = 0;
+
+        // 1. By productId
+        if(targetDocId){
+          try{
+            const prodRef = doc(db, colName, targetDocId);
+            const prodSnap = await getDoc(prodRef);
+            if(prodSnap.exists()){
+              oldData = prodSnap.data();
+              oldStok = Number(oldData.sisa ?? oldData.sisaStok ?? oldData.stokTersedia ?? oldData.stokAkhir ?? oldData.pcs ?? oldData.ready ?? oldData.stok ?? oldData.qty ?? oldData.jumlah ?? oldData.stock ?? 0);
+              targetRef = prodRef;
+            }
+          }catch(e){}
+        }
+        // 2. By barcode
+        if(!targetRef && g.barcode){
+          try{
+            const qBarcode = query(collection(db,colName), where("barcode","==", g.barcode));
+            const snapB = await getDocs(qBarcode);
+            if(!snapB.empty){
+              const d = snapB.docs[0];
+              oldData = d.data();
+              oldStok = Number(oldData.sisa ?? oldData.sisaStok ?? oldData.stokTersedia ?? oldData.stokAkhir ?? oldData.pcs ?? oldData.ready ?? oldData.stok ?? oldData.qty ?? oldData.jumlah ?? oldData.stock ?? 0);
+              targetRef = doc(db,colName,d.id);
+              targetDocId = d.id;
+            }
+          }catch(e){}
+        }
+        // 3. By nama
+        if(!targetRef && g.nama){
+          try{
+            const qNama = query(collection(db,colName), where("nama","==", g.nama));
+            const snapN = await getDocs(qNama);
+            if(!snapN.empty){
+              const d = snapN.docs[0];
+              oldData = d.data();
+              oldStok = Number(oldData.sisa ?? oldData.sisaStok ?? oldData.stokTersedia ?? oldData.stokAkhir ?? oldData.pcs ?? oldData.ready ?? oldData.stok ?? oldData.qty ?? oldData.jumlah ?? oldData.stock ?? 0);
+              targetRef = doc(db,colName,d.id);
+              targetDocId = d.id;
+            }
+          }catch(e){}
+        }
+
+        if(targetRef){
+          const qtyJual = Number(g.qty||0);
+          const newStok = Math.max(0, oldStok - qtyJual);
+          await updateDoc(targetRef, {
+            sisa: newStok, sisaStok: newStok, stokTersedia: newStok, stokAkhir: newStok, stokSisa: newStok, pcs: newStok, ready: newStok,
+            stok: newStok, qty: newStok, jumlah: newStok, stock: newStok,
+            updatedAt: new Date().toISOString(), lastSoldAt: new Date().toISOString(), lastSoldQty: qtyJual,
+            statusStok: newStok<=0 ? 'KOSONG' : 'READY', status: newStok<=0 ? 'KOSONG' : 'READY'
+          });
+          stockUpdateLogs.push(`${g.nama}: ${oldStok} - ${qtyJual} = ${newStok} ${qtyJual>1?'(gabung '+qtyJual+' pcs)':''}`);
+        }else{
+          stockUpdateLogs.push(`${g.nama}: tidak ketemu di stok - cek Firebase`);
+        }
+      }catch(errStok){
+        stockUpdateLogs.push(`${g.nama}: gagal update stok - ${errStok.message}`);
+      }
+    }
+    const stockMsg = stockUpdateLogs.length>0 ? '\n\nStock dikurangi:\n'+stockUpdateLogs.join('\n') : '';
+    if(cetakMode){
+      openCetakPopup(docRef.id, cetakMode);
+    }else{
+      showKonterPopup('Berhasil simpan! Nota: '+document.getElementById('notaField').value + stockMsg + ' | Konter: ' + konterName, 'success');
+      setTimeout(()=>{ location.href='data-penjualan.html'; }, 1500);
+    }
+  }catch(err){ showKonterPopup('Gagal simpan: '+err.message + ' | Konter: ' + konterName, 'error'); }
 }
 
 window.simpan=()=>simpanData(null);
 window.simpanCetak=()=>simpanData('popup');
 
+let cetakTemplateTerpilih=1;
+
 function openCetakPopup(id, mode){
+  cetakTemplateTerpilih=1;
   document.getElementById('cetakModal').classList.add('show');
   document.getElementById('cetakModal').setAttribute('data-id', id);
   document.getElementById('cetakModal').setAttribute('data-mode', mode);
+  document.querySelectorAll('#cetakModal .template-cetak-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('#cetakModal .template-cetak-btn[data-template="1"]')?.classList.add('active');
 }
+
+window.pilihTemplateCetak=(id)=>{
+  cetakTemplateTerpilih=Number(id)||1;
+  document.querySelectorAll('#cetakModal .template-cetak-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('#cetakModal .template-cetak-btn[data-template="'+cetakTemplateTerpilih+'"]').classList.add('active');
+};
+
 window.pilihCetak=(jenis)=>{
   const id=document.getElementById('cetakModal').getAttribute('data-id');
-  const html=`<div style="padding:20px;font-family:Arial"><h2>${konterName}</h2><p>Nota: ${document.getElementById('notaField').value}</p><p>Pelanggan: ${document.getElementById('namaPelangganField').value}</p><table><thead><tr><th>No</th><th>Produk</th><th>Qty</th><th>Harga</th><th>Subtotal</th></tr></thead><tbody>${rincianItems.map((it,i)=>`<tr><td>${i+1}</td><td>${it.nama}</td><td>${it.qty}</td><td>Rp ${it.harga}</td><td>Rp ${it.subtotal}</td></tr>`).join('')}</tbody></table><p>Total: Rp ${document.getElementById('totalField').value}</p></div>`;
-  const w=window.open('','_blank','width=400,height=600');
-  w.document.write(html);
-  w.document.close();
+  const nama=konterName||'NAMA PERUSAHAAN';
+  const nota=document.getElementById('notaField').value||'-';
+  const pelanggan=document.getElementById('namaPelangganField').value||'-';
+  const tanggal=document.getElementById('tanggalField').value||'-';
+  const teknisi=document.getElementById('teknisiSelect')?.selectedOptions?.[0]?.getAttribute('data-nama') || document.getElementById('teknisiSelect')?.value || '-';
+  const total=Number(document.getElementById('totalField').value||0);
+  const diskon=Number(document.getElementById('diskonField').value||0);
+  const dp=Number(document.getElementById('dpField').value||0);
+  const sisa=Number(document.getElementById('sisaField').value||0);
+  const t=cetakTemplateTerpilih;
+  const nomorEsc=String(nota).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const rupiah=v=>'Rp '+Number(v||0).toLocaleString('id-ID');
+  const rows=rincianItems.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.nama)}</td><td>${it.qty}</td><td>${rupiah(it.harga)}</td><td>${rupiah(it.subtotal)}</td></tr>`).join('');
+  const minimal=rincianItems.map(it=>`<div class="minimal-row"><span>${esc(it.nama)} ×${it.qty}</span><span>${rupiah(it.subtotal)}</span></div>`).join('');
+  const accent=t===2?'#2563eb':t===4?'#16a34a':t===5?'#ffc107':'#111';
+  const header=t===1?'border-bottom:2px solid #111':`background:${accent};color:${t===5?'#111':'#fff'};padding:9px;border-radius:7px`;
+  const barcode=(t===3)?'':`<div class="barcode"></div><div class="barcode-text">${nomorEsc}</div>`;
+  const policy='Barang yang sudah dibeli tidak dapat dikembalikan. Garansi mengikuti ketentuan perusahaan.';
+  const thanks='Terima kasih telah mempercayakan kebutuhan Anda kepada kami.';
+  const title=t===1?'Klasik':t===2?'Modern':t===3?'Minimal':t===4?'Profesional':'Konter';
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>${title} - ${nomorEsc}</title><style>
+    *{box-sizing:border-box}body{margin:0;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#111}.paper{width:${jenis==='5x8'?'302px':'390px'};max-width:100%;min-height:470px;margin:0 auto;background:#fff;padding:${jenis==='5x8'?'15px':'22px 20px'};box-shadow:0 0 0 transparent}.head{text-align:center;padding-bottom:9px;margin-bottom:10px}.company{font-size:20px;font-weight:900}.contact{font-size:10px;margin-top:4px;line-height:1.45}.doc{font-size:16px;font-weight:900;margin:8px 0 2px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:10px;margin:10px 0}.meta div{border-bottom:1px solid #aaa;padding-bottom:3px}table{width:100%;border-collapse:collapse;font-size:9px}th,td{border:1px solid #555;padding:5px 4px}th{font-weight:900}.totals{margin-top:9px;margin-left:auto;width:62%;font-size:10px}.totals div{display:flex;justify-content:space-between;border-bottom:1px solid #aaa;padding:3px}.policy{font-size:9px;line-height:1.45;margin-top:12px;padding:7px;border:1px dashed #777}.thanks{text-align:center;font-weight:900;font-size:11px;margin-top:10px}.barcode{height:38px;margin:10px auto 2px;width:180px;background:repeating-linear-gradient(90deg,#111 0 2px,#fff 2px 4px,#111 4px 5px,#fff 5px 8px)}.barcode-text{text-align:center;font-size:8px;letter-spacing:2px}.sign{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:17px;text-align:center;font-size:9px}.sign div{border-top:1px solid #333;padding-top:5px;margin-top:35px;min-height:15px}.minimal-row{display:flex;justify-content:space-between;border-bottom:1px dashed #999;padding:5px 0;font-size:9px}.minimal .company{font-size:16px}.minimal .doc{font-size:13px}.minimal .meta{font-size:9px}.minimal table{display:none}.minimal .policy{font-size:8px}.minimal .sign{font-size:8px}.mono{filter:grayscale(1)}@media print{body{background:#fff}.paper{box-shadow:none;margin:0 auto}}
+  </style></head><body><div class="paper ${t===3?'minimal':''} ${t===1?'classic':t===2?'modern':t===4?'professional':'counter'}">
+    <div class="head" style="${header}"><div class="company">${esc(nama)}</div><div class="contact">Nota Penjualan</div><div class="doc">NOTA PENJUALAN</div></div>
+    <div class="meta"><div>No. Nota: <b>${nomorEsc}</b></div><div>Tanggal: <b>${esc(tanggal)}</b></div><div>Pelanggan: <b>${esc(pelanggan)}</b></div><div>Kasir: <b>${esc(teknisi)}</b></div></div>
+    ${t===2?`<div style="font-weight:900;border-bottom:2px solid ${accent};padding:5px 0;margin-bottom:5px">DETAIL TRANSAKSI</div>`:''}
+    ${t===3?minimal:`<table><thead><tr><th>NO</th><th>BARANG / JASA</th><th>QTY</th><th>HARGA</th><th>JUMLAH</th></tr></thead><tbody>${rows}</tbody></table>`}
+    <div class="totals"><div><span>Subtotal</span><b>${rupiah(total+diskon)}</b></div><div><span>Diskon</span><b>${rupiah(diskon)}</b></div><div><span>TOTAL</span><b>${rupiah(total)}</b></div>${dp?`<div><span>Dibayar</span><b>${rupiah(dp)}</b></div>`:''}${sisa?`<div><span>Sisa</span><b>${rupiah(sisa)}</b></div>`:''}</div>
+    ${barcode}<div class="policy"><b>Kebijakan Perusahaan:</b><br>${policy}</div><div class="thanks">${thanks}</div>${t!==3?'<div class="sign"><div>Konsumen</div><div>Pemilik / Penanggung Jawab</div></div>':''}
+  </div><script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script></body></html>`;
+  const w=window.open('','_blank','width=400,height=650');
+  if(!w){showKonterPopup('Popup cetak diblokir browser. Izinkan popup untuk halaman ini.','error');return;}
+  w.document.write(html); w.document.close();
   document.getElementById('cetakModal').classList.remove('show');
   setTimeout(()=>{ location.href='data-penjualan.html'; }, 1000);
-}
+};
 
 window.refreshHalaman=()=>{ location.reload(); }
 
@@ -1287,8 +1319,8 @@ function showKonterPopup(message, type='info'){
   const titleEl = document.getElementById('konterAlertTitle');
   const konterEl = document.getElementById('konterAlertKonter');
   const iconEl = document.getElementById('konterAlertIcon');
-  if(titleEl) titleEl.textContent = type==='error' ? '❌ Perhatian' : type==='success' ? '✅ Berhasil' : '📢 Info';
-  if(konterEl) konterEl.textContent = konterName || 'Fixzy - A Yudi Thea';
+  if(titleEl) titleEl.textContent = type==='error' ? 'Perhatian' : type==='success' ? '✅ Berhasil' : '📢 Info';
+  if(konterEl) konterEl.textContent = konterName || 'Fixzy.';
   if(msgEl) msgEl.textContent = message;
   if(iconEl) iconEl.textContent = type==='error' ? '❌' : type==='success' ? '✅' : 'ℹ️';
   if(modal) modal.classList.add('show');
@@ -1607,28 +1639,18 @@ body.dark #manualToggle + label{
     <span>Informasi Transaksi</span>
   </div>
 
+  <!--
+    ID akun, pemilik usaha, dan teknisi TETAP dipertahankan karena
+    digunakan oleh JavaScript/Firebase untuk menyimpan transaksi.
+    Hanya tidak ditampilkan pada bagian informasi.
+  -->
+  <div style="display:none" aria-hidden="true">
+    <input id="akunLoginField" readonly>
+    <input id="konterField" readonly>
+    <select id="teknisiSelect"><option>Memuat karyawan...</option></select>
+  </div>
+
   <div class="info-transaksi-box">
-
-    <div class="info-row">
-      <span class="info-label">Akun</span>
-      <div class="info-value">
-        <input id="akunLoginField" readonly>
-      </div>
-    </div>
-
-    <div class="info-row">
-      <span class="info-label">Pemilik Usaha</span>
-      <div class="info-value">
-        <input id="konterField" readonly>
-      </div>
-    </div>
-
-    <div class="info-row">
-      <span class="info-label">Teknisi</span>
-      <div class="info-value">
-        <select id="teknisiSelect"><option>Memuat karyawan...</option></select>
-      </div>
-    </div>
 
     <div class="info-row">
       <span class="info-label">Nomor Nota</span>
@@ -1666,7 +1688,12 @@ body.dark #manualToggle + label{
 </div>
 
 <div class="card">
-  <div class="card-header"><span>Data Produk (Stok) + Manual</span><div style="display:flex;gap:6px;align-items:center"><span id="produkInfo" style="font-size:10px;color:#64748b">Memuat...</span><button type="button" onclick="fixStokSinkron()" style="background:#f59e0b;color:#111827;padding:4px 8px;border-radius:6px;font-size:10px;font-weight:900">🔧 Fix Sinkron Stok</button></div></div>
+<div class="card-header">
+  <span>Data Produk (Stok) + Manual</span>
+  <div style="display:flex;gap:6px;align-items:center">
+    <span id="produkInfo" style="font-size:10px;color:#64748b">Memuat...</span>
+  </div>
+</div>
   <div id="autoProdukWrap">
     <div id="produkStockInfo" style="font-size:11px;color:#16a34a;font-weight:800;margin-bottom:6px;display:none"></div>
     <label style="font-size:11px;font-weight:800">Cari Produk Auto (Dropdown dari stock produk)</label>
@@ -1711,14 +1738,7 @@ body.dark #manualToggle + label{
     <div><label style="font-size:11px;font-weight:800">DP (Uang Muka)</label><input id="dpField" type="number" value="0"></div>
     <div><label style="font-size:11px;font-weight:800">Sisa (Total - Diskon - DP)</label><input id="sisaField" type="number" readonly style="background:#f8fafc;font-weight:900;color:#15803d"></div>
   </div>
-  <div style="margin-top:10px">
-  <label style="font-size:11px;font-weight:800">Status</label>
-  <select id="statusField">
-    <option value="masuk">Masuk</option>
-    <option value="tagihan">Tagihan</option>
-    <option value="tunai">Tunai</option>
-  </select>
-</div>
+  <div style="margin-top:10px"><label style="font-size:11px;font-weight:800">Status</label><select id="statusField"><option value="masuk">Masuk</option><option value="tagihan">Tagihan</option><option value="tunai">Tunai</option><option value="diambil">Diambil</option><option value="batal" class="ownerOnly">Batal (Admin Only)</option></select></div>
   <div style="margin-top:10px;display:flex;justify-content:space-between;font-weight:900;background:#f8fafc;padding:10px;border-radius:10px"><span>Sisa Bayar:</span><span id="sisaDisplay" style="color:#15803d">Rp 0</span></div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:16px">
     <button type="button" onclick="batalInput()" style="background:#e5e7eb;color:#111827;padding:12px;border-radius:10px">Batal</button>
@@ -1745,11 +1765,29 @@ body.dark #manualToggle + label{
 
 <div class="modal" id="cetakModal">
   <div class="modal-box">
-    <h3 style="font-weight:900;margin:0 0 12px">Pilih Jenis Cetak</h3>
-    <p style="font-size:12px;color:#64748b;margin-bottom:12px">Simpan dulu ke Firebase, lalu cetak popup</p>
+    <h3 style="font-weight:900;margin:0 0 6px">🧾 Pilih Template Nota</h3>
+    <p style="font-size:12px;color:#64748b;margin:0 0 12px">Template hanya digunakan saat mencetak. Tidak disimpan ke Firebase.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <button class="template-cetak-btn active" data-template="1" onclick="pilihTemplateCetak(1)" style="background:#fff;color:#111827;border:2px solid #ffc107;padding:10px;border-radius:10px;text-align:left;box-shadow:none">
+        <b>1. Klasik</b><br><span style="font-size:10px;color:#64748b">Hitam/putih • tabel lengkap</span>
+      </button>
+      <button class="template-cetak-btn" data-template="2" onclick="pilihTemplateCetak(2)" style="background:#fff;color:#111827;border:2px solid #e2e8f0;padding:10px;border-radius:10px;text-align:left;box-shadow:none">
+        <b>2. Modern</b><br><span style="font-size:10px;color:#64748b">Header biru • total tegas</span>
+      </button>
+      <button class="template-cetak-btn" data-template="3" onclick="pilihTemplateCetak(3)" style="background:#fff;color:#111827;border:2px solid #e2e8f0;padding:10px;border-radius:10px;text-align:left;box-shadow:none">
+        <b>3. Minimal</b><br><span style="font-size:10px;color:#64748b">Ringkas • hemat kertas</span>
+      </button>
+      <button class="template-cetak-btn" data-template="4" onclick="pilihTemplateCetak(4)" style="background:#fff;color:#111827;border:2px solid #e2e8f0;padding:10px;border-radius:10px;text-align:left;box-shadow:none">
+        <b>4. Profesional</b><br><span style="font-size:10px;color:#64748b">Header hijau • invoice</span>
+      </button>
+      <button class="template-cetak-btn" data-template="5" onclick="pilihTemplateCetak(5)" style="background:#fff;color:#111827;border:2px solid #e2e8f0;padding:10px;border-radius:10px;text-align:left;box-shadow:none;grid-column:1/-1">
+        <b>5. Konter</b><br><span style="font-size:10px;color:#64748b">Header kuning • struktur</span>
+      </button>
+    </div>
+    <div style="font-size:12px;font-weight:900;margin-bottom:8px">Ukuran Cetak</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <button onclick="pilihCetak('5x8')" style="background:#111827;color:#fff;padding:16px;border-radius:12px">🖨️ Cetak 5x8<br><span style="font-size:10px;opacity:0.7">Kecil (5 inch x 8 inch)</span></button>
-      <button onclick="pilihCetak('umum')" style="background:#2563eb;color:#fff;padding:16px;border-radius:12px">🖨️ Cetak Umum<br><span style="font-size:10px;opacity:0.7">Struk 80mm / A4</span></button>
+      <button onclick="pilihCetak('5x8')" style="background:#111827;color:#fff;padding:14px;border-radius:12px">🖨️ Cetak 5x8<br><span style="font-size:10px;opacity:0.7">Kecil (5 inch x 8 inch)</span></button>
+      <button onclick="pilihCetak('umum')" style="background:#2563eb;color:#fff;padding:14px;border-radius:12px">🖨️ Cetak Umum<br><span style="font-size:10px;opacity:0.7">Struk 80mm / A4</span></button>
     </div>
     <button onclick="document.getElementById('cetakModal').classList.remove('show')" style="width:100%;margin-top:10px;background:#e5e7eb;color:#111827">Tutup</button>
   </div>
@@ -1761,5 +1799,5 @@ const s=localStorage.getItem('fixzy-dark');
 if(s==='1' || (!s && window.matchMedia('(prefers-color-scheme: dark)').matches)){ h.classList.add('dark'); document.body.classList.add('dark'); b.textContent='☀️'; }
 b.addEventListener('click', ()=>{ h.classList.toggle('dark'); document.body.classList.toggle('dark'); const d=h.classList.contains('dark'); localStorage.setItem('fixzy-dark', d?'1':'0'); b.textContent=d?'☀️':'🌙'; });
 </script>
-<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
+<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script><script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
 </html>
