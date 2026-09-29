@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fixzy - Input Penjualan - REF SERVISAN</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{--fx-bg:#eef2f6;--fx-card:#fff;--fx-border:#111827;--fx-radius:14px}
+*{box-sizing:border-box}body{margin:0;background:var(--fx-bg)!important;font-family:Arial,sans-serif}
+header{background:#111827;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100;border-bottom:2px solid #000}
+.logo{width:52px;height:52px;background:#000;border-radius:14px;display:flex;align-items:center;justify-content:center;border:1px solid #334155}
+main{max-width:920px;margin:auto;padding:14px}
+.card{background:#fff;border:2px solid #111827;border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:4px 4px 0 #111827}
+.card-header{font-weight:900;border-bottom:2px solid #111827;padding-bottom:9px;margin-bottom:14px;display:flex;justify-content:space-between}
+label{font-size:12px;font-weight:800;color:#4b5563;margin-bottom:5px;display:block}
+input,select,textarea{width:100%;padding:11px;border:2px solid #111827;border-radius:9px;box-shadow:2px 2px 0 #111827}
+.produk-dropdown{position:absolute;left:0;right:0;top:100%;margin-top:5px;background:#fff;border:2px solid #111827;border-radius:10px;box-shadow:4px 4px 0 #111827;max-height:240px;overflow:auto;z-index:30;display:none}
+.produk-dropdown.show{display:block}
+.produk-item{padding:10px 12px;cursor:pointer;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between}
+.produk-item:hover{background:#f1f5f9}
+.rincian-table{width:100%;border-collapse:collapse;margin-top:8px;border:2px solid #111827;border-radius:10px;overflow:hidden;box-shadow:3px 3px 0 #111827}
+.rincian-table th{background:#f8fafc;font-size:10px;font-weight:900;text-align:left;padding:9px;border-bottom:1px solid #e5e7eb}
+.rincian-table td{padding:9px;border-bottom:1px solid #e5e7eb;font-size:12px}
+#manualToggle{width:18px;height:18px}
+#manualCheckboxRow{display:none}
+#manualCheckboxRow.show{display:flex}
+#manualSection{display:none}
+#manualSection.show{display:block}
+.info-box{border:2px solid #111827;border-radius:12px;overflow:hidden;background:#fff;box-shadow:3px 3px 0 #111827}
+.info-row{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:10px 12px;border-bottom:1px solid #e5e7eb;align-items:center}
+.info-row span{color:#64748b;font-weight:800;font-size:12px}
+.info-row b{text-align:right;font-size:12px}
+</style>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, getDocs, doc, getDoc, addDoc, updateDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const firebaseConfig={apiKey:"AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",authDomain:"fixzy-update.firebaseapp.com",projectId:"fixzy-update",storageBucket:"fixzy-update.appspot.com",messagingSenderId:"431404655232",appId:"1:431404655232:web:5f7d9c9a1b2c3d4e5f6a7"};
+const app=initializeApp(firebaseConfig);const auth=getAuth(app);const db=getFirestore(app);
+let currentUser=null,ownerUid=null,konterName="",allProduk=[],rincianItems=[],karyawanList=[];
+onAuthStateChanged(auth,async u=>{
+  if(!u){location.href="login.html";return;}
+  currentUser=u;
+  document.getElementById('akunSide').textContent=u.email;
+  document.getElementById('akunLoginField').value=u.email;
+  try{
+    const snap=await getDoc(doc(db,"users",u.uid));
+    let p=snap.exists()?snap.data():{};
+    ownerUid=p.role==="owner"||p.isOwner?u.uid:(p.ownerUid||p.ownerId||u.uid);
+    konterName=p.namaKonter||p.namaToko||"FIXZY";
+    document.getElementById('konterField').value=konterName;
+    document.getElementById('roleSide').textContent=(p.role||'owner').toUpperCase();
+  }catch(e){ownerUid=u.uid;konterName="FIXZY";}
+  document.getElementById('tanggalField').valueAsDate=new Date();
+  autoGenerateNotaBarcode();await loadKaryawan();await loadProdukREFSERVISAN();
+});
+async function loadKaryawan(){
+  try{
+    const q=await getDocs(query(collection(db,"users"),where("ownerUid","==",ownerUid)));
+    const list=[];q.forEach(d=>{const data=d.data();list.push({nama:data.nama||data.email||d.id});});
+    list.unshift({nama:currentUser.email.split('@')[0]});
+    const seen=new Set();karyawanList=list.filter(k=>{const key=k.nama.toLowerCase();if(seen.has(key)) return false;seen.add(key);return true;});
+    document.getElementById('teknisiSelect').innerHTML=karyawanList.map(k=>`<option value="${k.nama}">${k.nama}</option>`).join('');
+  }catch(e){}
+}
+async function loadProdukREFSERVISAN(){
+  try{
+    allProduk=[];
+    const snap=await getDocs(collection(db,"stok"));
+    const map=new Map();
+    snap.forEach(d=>{
+      const data=d.data()||{};
+      const stokVal=Number(data.sisa??data.sisaStok??data.stokTersedia??data.stok??0)||0;
+      const produk={id:d.id,_stok:stokVal,_col:"stok",...data};
+      const key=String(data.kode||data.barcode||data.nama||d.id).toLowerCase().trim();
+      const old=map.get(key);
+      if(!old||produk._stok>old._stok) map.set(key,produk);
+    });
+    allProduk=Array.from(map.values());
+    const info=document.getElementById('produkInfo');
+    if(allProduk.length===0){
+      info.textContent='Tidak ada produk stok - centang manual';
+      document.getElementById('manualCheckboxRow').classList.add('show');
+      document.getElementById('manualToggle').checked=true;
+      document.getElementById('manualSection').classList.add('show');
+    }else{
+      info.textContent=`${allProduk.length} produk • Total stok ${allProduk.reduce((s,p)=>s+Number(p._stok||0),0)} • Ref Input Servisan`;
+      document.getElementById('manualCheckboxRow').classList.remove('show');
+      document.getElementById('manualSection').classList.remove('show');
+      document.getElementById('manualToggle').checked=false;
+    }
+  }catch(e){document.getElementById('produkInfo').textContent='Gagal baca produk: '+e.message;}
+}
+function filterProduk(keyword){
+  const kw=(keyword||'').toLowerCase().trim();
+  let filtered=allProduk;
+  if(kw){filtered=allProduk.filter(p=>{const nama=(p.nama||'').toLowerCase();const kode=(p.kode||'').toLowerCase();return nama.includes(kw)||kode.includes(kw);});}
+  showProdukDropdown(filtered);
+}
+window.filterProduk=filterProduk;
+function showProdukDropdown(list){
+  const wrap=document.getElementById('produkSearch').parentElement;
+  let dd=wrap.querySelector('.produk-dropdown');
+  if(!dd){dd=document.createElement('div');dd.className='produk-dropdown';wrap.style.position='relative';wrap.appendChild(dd);}
+  if(list.length===0){dd.innerHTML=`<div style="padding:12px;color:#94a3b8;text-align:center">Tidak ada produk - centang manual</div>`;}
+  else{dd.innerHTML=list.slice(0,80).map(p=>{const nama=p.nama||'-';const harga=p.harga||0;const stok=Number(p._stok||0);return `<div class="produk-item" data-id="${p.id}"><div><b>${nama}</b><br><small style="color:${stok<=0?'#f59e0b':'#16a34a'}">Stok: ${stok}</small></div><div>Rp ${Number(harga).toLocaleString('id-ID')}</div></div>`;}).join('');}
+  dd.classList.add('show');
+  dd.querySelectorAll('.produk-item').forEach(el=>{el.addEventListener('click',()=>{const prod=allProduk.find(x=>x.id===el.dataset.id);if(prod) selectProdukAuto(prod);dd.classList.remove('show');});});
+}
+function hideProdukDropdown(){const dd=document.querySelector('.produk-dropdown');if(dd) dd.classList.remove('show');}
+function selectProdukAuto(prod){
+  document.getElementById('produkSearch').value=prod.nama||'';
+  document.getElementById('produkNamaAuto').value=prod.nama||'';
+  document.getElementById('hargaAuto').value=prod.harga||prod.hargaJual||0;
+  document.getElementById('modalAuto').value=prod.modal||prod.hargaBeli||0;
+  document.getElementById('qtyAuto').value=1;
+  document.getElementById('produkNamaAuto').setAttribute('data-id',prod.id);
+  document.getElementById('produkNamaAuto').setAttribute('data-stok',prod._stok);
+  document.getElementById('barcodeField').value=prod.barcode||document.getElementById('barcodeField').value;
+  hitungSubtotalAuto();
+}
+function hitungSubtotalAuto(){document.getElementById('subtotalAuto').value=Number(document.getElementById('hargaAuto').value||0)*Number(document.getElementById('qtyAuto').value||0);}
+function hitungSubtotalManual(){document.getElementById('subtotalManual').value=Number(document.getElementById('hargaManual').value||0)*Number(document.getElementById('qtyManual').value||0);}
+window.toggleManual=()=>{
+  const chk=document.getElementById('manualToggle').checked;
+  document.getElementById('manualWrap').style.display=chk?'grid':'none';
+  document.getElementById('autoProdukWrap').style.display=chk?'none':'block';
+  if(chk) document.getElementById('manualSection').classList.add('show');
+}
+window.tambahProduk=()=>{
+  const isManual=document.getElementById('manualToggle').checked;
+  let item=null;
+  if(isManual){
+    const nama=document.getElementById('produkNamaManual').value.trim();
+    if(!nama){alert('Nama manual wajib');return;}
+    const harga=Number(document.getElementById('hargaManual').value||0);
+    const qty=Number(document.getElementById('qtyManual').value||0);
+    item={nama,barcode:document.getElementById('barcodeManual').value||'',harga,modal:harga,qty,subtotal:harga*qty,type:'manual'};
+  }else{
+    const nama=document.getElementById('produkNamaAuto').value||document.getElementById('produkSearch').value;
+    if(!nama){alert('Pilih produk');return;}
+    const harga=Number(document.getElementById('hargaAuto').value||0);
+    const qty=Number(document.getElementById('qtyAuto').value||0);
+    const prodId=document.getElementById('produkNamaAuto').getAttribute('data-id')||'';
+    item={nama,barcode:document.getElementById('barcodeField').value,harga,modal:document.getElementById('modalAuto').value||harga,qty,subtotal:harga*qty,type:'auto',productId:prodId};
+  }
+  rincianItems.push(item);renderRincian();
+  document.getElementById('produkSearch').value='';document.getElementById('produkNamaAuto').value='';document.getElementById('hargaAuto').value='';document.getElementById('modalAuto').value='';document.getElementById('qtyAuto').value=1;document.getElementById('subtotalAuto').value='';
+  document.getElementById('produkNamaManual').value='';document.getElementById('barcodeManual').value='';document.getElementById('hargaManual').value='';document.getElementById('qtyManual').value=1;document.getElementById('subtotalManual').value='';
+}
+function renderRincian(){
+  const tbody=document.getElementById('rincianBody');
+  if(rincianItems.length===0){tbody.innerHTML=`<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:16px">Belum ada produk</td></tr>`;document.getElement

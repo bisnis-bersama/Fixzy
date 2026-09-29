@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#081326">
+<title>FIXZY | Data Upah Karyawan - FIXED ISOLASI</title>
+<style>
+*{box-sizing:border-box}
+:root{--navy:#081326;--navy2:#101d33;--yellow:#ffc107;--bg:#f2f5f9;--card:#fff;--line:#dbe3ed;--text:#172033;--muted:#64748b;--green:#16a34a;--red:#dc2626;--blue:#2563eb;--orange:#f59e0b}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,Helvetica,sans-serif}
+button,input,select{font:inherit}
+.header{position:sticky;top:0;z-index:30;background:var(--navy);color:#fff;min-height:74px;padding:9px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 4px 16px #0004}
+.logo{width:52px;height:52px;object-fit:contain;border-radius:10px;flex:none}
+.brand{flex:1;min-width:0}.brand h1{font-size:19px;margin:0;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.brand p{font-size:11px;color:#cbd5e1;margin:3px 0 0}
+.owner{text-align:right;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.owner b{display:block;font-size:12px}.owner span{display:block;font-size:10px;color:#cbd5e1;margin-top:3px}
+.refresh{height:44px;width:44px;border:0;border-radius:12px;background:var(--yellow);font-weight:900;cursor:pointer;color:#111;font-size:20px}
+.wrap{max-width:1200px;margin:auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 4px 16px #0000000a}
+.status{font-size:12px;color:var(--muted);line-height:1.5}.ok{color:#15803d;font-weight:800}.err{color:#b91c1c;font-weight:800}
+.toolbar{display:grid;grid-template-columns:1fr 1fr 1.5fr auto;gap:9px;align-items:end}
+.field{display:flex;flex-direction:column;gap:5px}label{font-size:11px;font-weight:900;color:#475569}
+input,select{height:43px;width:100%;border:1px solid #cbd5e1;border-radius:11px;padding:0 11px;background:#fff;outline:none}
+input:focus,select:focus{border-color:var(--yellow);box-shadow:0 0 0 3px #ffc10722}
+.btn{height:43px;border:0;border-radius:11px;padding:0 15px;font-weight:900;cursor:pointer}.dark{background:var(--navy);color:#fff}.yellow{background:var(--yellow);color:#111}.green{background:var(--green);color:#fff}.light{background:#e2e8f0;color:#111}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:9px}
+.kpi{padding:13px;border-radius:14px;color:#fff}.kpi small{display:block;font-size:10px;font-weight:900;opacity:.9}.kpi b{display:block;font-size:20px;margin-top:6px}
+.k1{background:linear-gradient(135deg,#2563eb,#1d4ed8)}.k2{background:linear-gradient(135deg,#16a34a,#059669)}.k3{background:linear-gradient(135deg,#7c3aed,#4f46e5)}.k4{background:linear-gradient(135deg,#ef4444,#dc2626)}.k5{background:linear-gradient(135deg,#f59e0b,#d97706)}
+.section-title{font-size:17px;font-weight:900;margin:0 0 10px}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px}table{width:100%;border-collapse:collapse;min-width:900px}th{background:var(--navy2);color:#fff;text-align:left;padding:10px;font-size:12px}td{padding:10px;border-bottom:1px solid #edf1f5;font-size:12px;vertical-align:middle}.num{text-align:right;white-space:nowrap}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:900}.badge.green{background:#dcfce7;color:#166534}.badge.red{background:#fee2e2;color:#991b1b}.badge.blue{background:#dbeafe;color:#1d4ed8}.badge.orange{background:#fef3c7;color:#92400e}
+.empty{text-align:center;color:var(--muted);padding:25px}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <img src="logo.png" class="logo" alt="FIXZY">
+  <div class="brand">
+    <h1>FIXZY - DATA UPAH KARYAWAN</h1>
+    <p>Isolasi per konter • hanya ownerUid yang sama</p>
+  </div>
+  <div class="owner"><b id="ownerName">Memuat...</b><span id="ownerEmail">Firebase</span></div>
+  <button class="refresh" onclick="muatSemua()" title="Refresh">↻</button>
+</header>
+
+<main class="wrap">
+
+<section class="card">
+  <div id="status" class="status">Memeriksa sesi Firebase...</div>
+</section>
+
+<section class="card">
+  <div class="toolbar">
+    <div class="field">
+      <label>PERIODE UPAH</label>
+      <select id="periode">
+        <option value="bulan">Bulan ini</option>
+        <option value="hari">Hari ini</option>
+        <option value="tahun">Tahun ini</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>TANGGAL / BULAN</label>
+      <input id="periodeTanggal" type="month">
+    </div>
+    <div class="field search">
+      <label>CARI KARYAWAN</label>
+      <input id="cari" placeholder="Nama, jabatan, role..." oninput="render()">
+    </div>
+    <button class="btn dark" onclick="muatSemua()">↻ Refresh</button>
+  </div>
+</section>
+
+<section class="kpis">
+  <div class="kpi k1"><small>KARYAWAN</small><b id="karyawan">0</b></div>
+  <div class="kpi k2"><small>HARI HADIR</small><b id="hadir">0</b></div>
+  <div class="kpi k3"><small>TOTAL UPAH</small><b id="gross">Rp 0</b></div>
+  <div class="kpi k4"><small>KASBON</small><b id="kasbon">Rp 0</b></div>
+  <div class="kpi k5"><small>SISA UPAH</small><b id="net">Rp 0</b></div>
+</section>
+
+<section class="card" style="margin-top:12px">
+  <h2 class="section-title">💰 Rincian Upah Karyawan (hanya konter ini)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>No</th><th>Nama</th><th>Jabatan</th><th>Role</th><th>Upah/Hari</th><th>Hadir</th><th>Total</th><th>Kasbon</th><th>Sisa</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"><tr><td colspan="10" class="empty">Memuat...</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2 class="section-title">📅 Absensi Periode Ini (konter ini saja)</h2>
+  <div class="table-wrap"><table><thead><tr><th>Tanggal</th><th>Nama</th><th>Status</th><th>Masuk</th><th>Pulang</th><th>Catatan</th></tr></thead><tbody id="absensiBody"></tbody></table></div>
+</section>
+
+<section class="card">
+  <h2 class="section-title">💸 Kasbon Periode Ini (konter ini saja)</h2>
+  <div class="table-wrap"><table><thead><tr><th>Tanggal</th><th>Nama</th><th>Jenis</th><th>Keterangan</th><th>Nominal</th></tr></thead><tbody id="kasbonBody"></tbody></table></div>
+</section>
+
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, collection, query, where, getDocs, getDocsFromServer } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+
+const cfg={apiKey:"AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",authDomain:"fixzy-update.firebaseapp.com",projectId:"fixzy-update",storageBucket:"fixzy-update.firebasestorage.app",messagingSenderId:"995892519622",appId:"1:995892519622:web:fa41047944d8e5b35d6dc7"};
+const app=initializeApp(cfg);
+const auth=getAuth(app);
+const db=getFirestore(app);
+
+let uid="", myOwnerUid="", currentUser=null;
+let accounts=[], absensi=[], pengeluaran=[];
+const $=id=>document.getElementById(id);
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function money(n){return "Rp "+(Number(n)||0).toLocaleString("id-ID");}
+function today(){return new Date().toISOString().slice(0,10);}
+function monthNow(){return new Date().toISOString().slice(0,7);}
+function periodKey(){const p=$("periode").value;const v=$("periodeTanggal").value; if(p==="hari") return v||today(); if(p==="tahun") return (v||monthNow()).slice(0,4); return v||monthNow();}
+function dateOf(x){return String(x.tanggal||x.date||x.tanggalAbsen||"").slice(0,10);}
+function matchPeriod(x){const d=dateOf(x);const k=periodKey(); if(!d||!k) return false; if(k.length===10) return d===k; if(k.length===7) return d.startsWith(k); return d.startsWith(k);}
+function upahHarian(a){return Number(a.upahHarian??a.upah??a.gajiHarian??0)||0;}
+function nama(a){return String(a.nama||a.namaKaryawan||a.namaLengkap||a.displayName||a.email||"").trim();}
+function role(a){return String(a.role||a.posisi||"-").toLowerCase();}
+function normalizeName(s){return String(s||"").toLowerCase().trim();}
+function isHadir(x){return String(x.status||"").toLowerCase()==="hadir"||!!(x.jamMasuk||x.masuk);}
+function isKasbon(x){const j=String(x.jenis||x.type||"").toLowerCase(); return j.includes("kasbon")||j.includes("bon");}
+function kasbonName(x){return String(x.namaKaryawan||x.nama||x.karyawan||"");}
+function kasbonAmount(x){return Number(x.nominal||x.jumlah||x.amount||0)||0;}
+function attendanceMatchesEmployee(att, emp){
+  const an=normalizeName(nama(emp));
+  const en=normalizeName(att.nama||att.namaKaryawan||att.namaTeknisi||"");
+  if(!an||!en) return false;
+  return an===en || en.includes(an) || an.includes(en);
+}
+
+/* ========== FIX ISOLASI ========== */
+async function loadMyProfile(user){
+  const snap=await getDoc(doc(db,"users",user.uid));
+  if(!snap.exists()) throw new Error("Profil users tidak ditemukan");
+  const data=snap.data()||{};
+  const r=String(data.role||"").toLowerCase();
+  myOwnerUid = (r==="owner" || data.isOwner===true) ? user.uid : (data.ownerUid||data.ownerId||user.uid);
+  return data;
+}
+
+async function getOwned(colName){
+  const map=new Map();
+  async function ambil(field,value){
+    if(!value) return;
+    try{
+      const q=query(collection(db,colName), where(field,"==",value));
+      const snap=await getDocsFromServer(q);
+      snap.docs.forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
+    }catch(e){console.warn(colName,field,e.message);}
+  }
+  await ambil("ownerUid", myOwnerUid);
+  await ambil("ownerId", myOwnerUid);
+  await ambil("uid", myOwnerUid);
+  if(myOwnerUid!==uid){
+    await ambil("ownerUid", uid);
+    await ambil("ownerId", uid);
+  }
+  return [...map.values()];
+}
+
+async function getOwnedUsers(){
+  // users tidak punya ownerUid filter langsung, jadi ambil semua lalu filter client tapi hanya yang ownerUid sama
+  // + query ownerUid untuk yang baru
+  const map=new Map();
+  async function ambil(field,value){
+    try{
+      const q=query(collection(db,"users"), where(field,"==",value));
+      const snap=await getDocsFromServer(q);
+      snap.docs.forEach(d=>map.set(d.id,{id:d.id,...d.data()}));
+    }catch(e){console.warn("users",field,e.message);}
+  }
+  await ambil("ownerUid", myOwnerUid);
+  await ambil("ownerId", myOwnerUid);
+  await ambil("uid", myOwnerUid);
+  // owner sendiri
+  try{
+    const me=await getDoc(doc(db,"users",uid));
+    if(me.exists()) map.set(me.id,{id:me.id,...me.data()});
+  }catch{}
+  return [...map.values()];
+}
+
+async function loadData(){
+  const [u, a, p] = await Promise.all([
+    getOwnedUsers(),
+    getOwned("absensi"),
+    getOwned("pengeluaran")
+  ]);
+  let filteredUsers = u.filter(x=>{
+    const r=String(x.role||"").toLowerCase();
+    const j=String(x.jabatan||x.posisi||"").toLowerCase();
+    const up=upahHarian(x);
+    const isWorker=["employee","karyawan","kasir","kurir","reseller","teknisi"].includes(r);
+    const sameOwner = String(x.ownerUid||x.ownerId||"")==myOwnerUid || String(x.uid||"")==myOwnerUid || String(x.id||"")==uid || String(x.ownerUid||"")==uid;
+    // hanya yang 1 konter
+    if(!sameOwner && String(x.id)!==uid && String(x.uid)!==uid) {
+      // tetap izinkan jika ownerUid nya sama
+      if(String(x.ownerUid||x.ownerId||"")!==myOwnerUid) return false;
+    }
+    return isWorker || up>0 || /karyawan|kasir|kurir|teknisi|staff/.test(j);
+  });
+  // pastikan owner tidak kehitung sebagai karyawan jika tidak ada upah
+  accounts=filteredUsers;
+  absensi=a;
+  pengeluaran=p;
+}
+
+function buildRows(){
+  return accounts.map(a=>{
+    const hadirRows=absensi.filter(x=>matchPeriod(x)&&isHadir(x)&&attendanceMatchesEmployee(x,a));
+    const takes=pengeluaran.filter(x=>{
+      if(!matchPeriod(x)||!isKasbon(x))return false;
+      const kn=kasbonName(x).toLowerCase();
+      const an=nama(a).toLowerCase();
+      return kn&&an&&(kn===an||kn.includes(an)||an.includes(kn));
+    });
+    const gross=hadirRows.length*upahHarian(a);
+    const take=takes.reduce((s,x)=>s+kasbonAmount(x),0);
+    return {a, days:hadirRows.length, gross, take, net:Math.max(0,gross-take)};
+  });
+}
+
+function render(){
+  const q=String($("cari").value||"").toLowerCase().trim();
+  const all=buildRows();
+  const rows=all.filter(r=>{
+    const a=r.a;
+    return !q||[nama(a),a.jabatan,a.posisi,role(a),a.email].join(" ").toLowerCase().includes(q);
+  });
+
+  $("karyawan").textContent=all.length;
+  $("hadir").textContent=all.reduce((s,r)=>s+r.days,0);
+  $("gross").textContent=money(all.reduce((s,r)=>s+r.gross,0));
+  $("kasbon").textContent=money(all.reduce((s,r)=>s+r.take,0));
+  $("net").textContent=money(all.reduce((s,r)=>s+r.net,0));
+
+  $("tbody").innerHTML=rows.map((r,i)=>{
+    const a=r.a; const status=r.days>0?"Aktif":"Belum Hadir";
+    return `<tr>
+      <td>${i+1}</td>
+      <td><b>${esc(nama(a))}</b><div style="font-size:9px;color:#94a3b8">${esc(a.email||"")}</div></td>
+      <td>${esc(a.jabatan||a.posisi||"-")}</td>
+      <td><span class="badge blue">${esc(role(a))}</span></td>
+      <td>${money(upahHarian(a))}</td>
+      <td><b>${r.days}</b> hari</td>
+      <td class="num"><b>${money(r.gross)}</b></td>
+      <td class="num">${r.take?'<span class="badge red">'+money(r.take)+'</span>':money(0)}</td>
+      <td class="num"><b>${money(r.net)}</b></td>
+      <td><span class="badge ${r.days?'green':'orange'}">${status}</span></td>
+    </tr>`;
+  }).join("")||'<tr><td colspan="10" class="empty">Belum ada karyawan untuk konter ini.</td></tr>';
+
+  const ab=absensi.filter(matchPeriod).sort((a,b)=>dateOf(b).localeCompare(dateOf(a)));
+  $("absensiBody").innerHTML=ab.map(x=>`<tr><td>${esc(dateOf(x))}</td><td><b>${esc(x.nama||x.namaKaryawan||"-")}</b></td><td><span class="badge ${isHadir(x)?"green":"orange"}">${esc(x.status||"-")}</span></td><td>${esc(x.jamMasuk||"-")}</td><td>${esc(x.jamPulang||"-")}</td><td>${esc(x.catatan||"-")}</td></tr>`).join("")||'<tr><td colspan="6" class="empty">Belum ada absensi.</td></tr>';
+
+  const kb=pengeluaran.filter(x=>matchPeriod(x)&&isKasbon(x)).sort((a,b)=>dateOf(b).localeCompare(dateOf(a)));
+  $("kasbonBody").innerHTML=kb.map(x=>`<tr><td>${esc(dateOf(x))}</td><td>${esc(kasbonName(x)||"-")}</td><td>${esc(x.jenis||"Kasbon")}</td><td>${esc(x.keterangan||"-")}</td><td class="num">${money(kasbonAmount(x))}</td></tr>`).join("")||'<tr><td colspan="5" class="empty">Belum ada kasbon.</td></tr>';
+}
+
+async function muatSemua(){
+  $("status").textContent="⏳ Membaca data Firebase (hanya ownerUid: "+myOwnerUid.slice(0,8)+"...)";
+  try{
+    await loadData();
+    render();
+    $("status").innerHTML=`<span class="ok">✓ Firebase aktif • ${accounts.length} karyawan • Absensi ${absensi.length} • Pengeluaran ${pengeluaran.length} • Periode ${esc(periodKey())} • Isolasi konter aktif</span>`;
+  }catch(e){
+    console.error(e);
+    $("status").innerHTML=`<span class="err">❌ Gagal: ${esc(e.message||e)}</span>`;
+  }
+}
+window.muatSemua=muatSemua;
+window.render=render;
+$("periodeTanggal").value=monthNow();
+$("periode").addEventListener("change",()=>{const p=$("periode").value; const f=$("periodeTanggal"); if(p==="hari")f.type="date"; else f.type="month"; f.value=p==="hari"?today():monthNow(); render(); muatSemua();});
+$("periodeTanggal").addEventListener("change",()=>{render(); muatSemua();});
+
+onAuthStateChanged(auth,async user=>{
+  if(user){
+    uid=user.uid; currentUser=user;
+    try{
+      const prof=await loadMyProfile(user);
+      $("ownerName").textContent=prof.namaKonter||prof.nama||user.displayName||"Akun FIXZY";
+      $("ownerEmail").textContent=user.email||"Firebase";
+      await muatSemua();
+    }catch(e){
+      $("status").innerHTML=`<span class="err">❌ ${esc(e.message)}</span>`;
+    }
+  }else{
+    uid=""; myOwnerUid=""; $("ownerName").textContent="Menunggu sesi FIXZY..."; $("ownerEmail").textContent="";
+  }
+});
+</script>
+</body>
+</html>
