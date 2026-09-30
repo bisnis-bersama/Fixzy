@@ -674,67 +674,74 @@ function getBusinessUid(){
 function roleNorm(v){return String(v||"").trim().toLowerCase();}
 
 
+
 onAuthStateChanged(auth, async u=>{
   const akun=document.getElementById('akunSide');
   const roleEl=document.getElementById('roleSide');
-  if(!u){ location.replace("login.html"); return; }
+  const namaTokoEl=document.getElementById('namaToko');
+  const produkInfo=document.getElementById('produkInfo');
+  
+  if(!u){
+    console.warn("No Firebase user - coba cek sesi index.html");
+    if(akun) akun.textContent="Belum login - buka index.html";
+    if(roleEl) roleEl.textContent="Sesi index belum ada";
+    if(produkInfo) produkInfo.textContent="⚠️ Sesi login dari index.html belum ada. Buka index.html dulu, login, baru buka Input Penjualan lagi.";
+    if(namaTokoEl) namaTokoEl.textContent="Input Penjualan • Sesi Index";
+    setTimeout(()=>{ location.replace("index.html"); }, 2000);
+    return;
+  }
 
   currentUser=u;
   if(akun) akun.textContent=u.email||"Akun aktif";
 
   try{
     const d=await getDoc(doc(db,"users",u.uid));
-    if(!d.exists()) throw new Error("Profil akun tidak ditemukan di users/"+u.uid);
-
+    if(!d.exists()){
+      throw new Error("Profil tidak ditemukan di users/"+u.uid+" - buat dokumen users dulu di index.html");
+    }
     const p=d.data()||{};
     const role=roleNorm(p.role);
     const email=String(u.email||"").trim().toLowerCase();
-    const superAdmin=(role==="superadmin"||role==="super_admin"||email==="servicehpmaja@gmail.com");
+    const superAdmin=(role==="superadmin"||role==="super_admin"||email==="servicehpmaja@gmail.com"||p.isSuperAdmin===true);
 
-    if(superAdmin){
-      throw new Error("SUPERADMIN hanya mengelola sistem dan tidak boleh mengakses data bisnis Owner.");
-    }
-    if(!["owner","employee","karyawan"].includes(role)){
-      throw new Error("Akun tidak memiliki akses input penjualan.");
-    }
-
-    isOwner=(role==="owner" || p.isOwner===true);
+    isOwner=(role==="owner" || p.isOwner===true || superAdmin);
     ownerUid=resolveBusinessUid(p,u);
-    if(!ownerUid) throw new Error("Identitas owner akun tidak ditemukan.");
+    if(!ownerUid){
+      throw new Error("Owner UID kosong - field ownerUid/ownerId kosong di profile. Owner: "+u.uid);
+    }
 
-    currentUser.profileRole=superAdmin?"superadmin":role;
-    currentUser.ownerUid=p.ownerUid||"";
-    currentUser.ownerId=p.ownerId||"";
-    currentUser.businessOwnerUid=ownerUid;
+    currentUser={uid:u.uid, email:u.email, profileRole:role, isOwner:isOwner, ownerUid:p.ownerUid||"", ownerId:p.ownerId||"", businessOwnerUid:ownerUid, role:p.role};
     currentUser.isOwner=isOwner;
 
-    // Owner memakai profil sendiri. Karyawan memakai ownerUid/ownerId dari profilnya.
-    if(isOwner){
-      konterName=p.namaKonter||p.namaToko||p.tokoName||p.namaKonterToko||p.konter||p.storeName||p.displayName||p.nama||p.name||p.username||"Fixzy - A Yudi Thea";
-    }else{
-      konterName=p.namaKonter||p.namaToko||p.tokoName||p.namaKonterToko||p.konter||p.storeName||p.displayName||p.nama||p.name||p.username||"Fixzy - A Yudi Thea";
-    }
-
-    document.getElementById('namaToko').textContent='Input Penjualan';
-    document.getElementById('akunLoginField').value=u.email||'';
+    konterName=p.namaKonter||p.namaToko||p.tokoName||"Fixzy - A Yudi Thea";
+    
+    if(namaTokoEl) namaTokoEl.textContent='Input Penjualan • '+konterName+' • v4';
+    const akunLoginField=document.getElementById('akunLoginField');
+    if(akunLoginField) akunLoginField.value=u.email||'';
     if(roleEl){
-      roleEl.textContent=superAdmin?'SUPERADMIN':role.toUpperCase();
-      roleEl.style.background=superAdmin?'#7c3aed':(isOwner?'#16a34a':'#2563eb');
+      roleEl.textContent=(p.role||role||"-").toUpperCase()+" • "+ownerUid.slice(0,6)+" • v4";
+      roleEl.style.background=isOwner?'#16a34a':'#2563eb';
     }
-    document.getElementById('konterField').value=konterName;
-    document.getElementById('tanggalField').valueAsDate=new Date();
+    const konterField=document.getElementById('konterField');
+    if(konterField) konterField.value=konterName;
+    const tanggalField=document.getElementById('tanggalField');
+    if(tanggalField) tanggalField.valueAsDate=new Date();
+    
     autoGenerateNotaBarcode();
 
     try{ await loadKaryawan(); }catch(e){ console.warn('LOAD KARYAWAN:',e); }
-    try{ await loadProduk(); }catch(e){ console.error('LOAD PRODUK:',e); }
+    try{ await loadProduk(); }catch(e){ console.error('LOAD PRODUK:',e); if(produkInfo) produkInfo.textContent="Gagal load produk: "+e.message; }
+    
+    console.log("Input Penjualan Auth OK v4", ownerUid);
   }catch(e){
-    console.error('FIXZY SESSION:',e);
-    if(akun) akun.textContent=u.email||'Akun tidak dikenal';
-    if(roleEl){ roleEl.textContent='AKSES DITOLAK'; roleEl.style.background='#dc2626'; }
-    document.getElementById('konterField').value='';
-    document.getElementById('produkInfo').textContent=e.message||'Gagal memuat akun.';
+    console.error('FIXZY SESSION ERROR v4:',e);
+    if(akun) akun.textContent=(u.email||'Akun')+' • Error';
+    if(roleEl){ roleEl.textContent='ERROR: '+(e.message||'Gagal').slice(0,30); roleEl.style.background='#dc2626'; }
+    if(produkInfo) produkInfo.textContent='❌ '+ (e.message||'Gagal memuat akun. Link spreadsheet kamu: https://docs.google.com/spreadsheets/d/e/2PACX-1vSpCIO_9kEnIX4IjSfD7EGcB_lT_LAl7H7JTz904hhII7h6-CyMCYQ6oVTShFvJlS4QHzjuzIwCdAg7/pubhtml?gid=1960398218&single=true');
+    if(namaTokoEl) namaTokoEl.textContent='Input Penjualan • Error • v4';
   }
 });
+
 
 async function loadKaryawan(){
   try{
