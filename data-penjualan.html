@@ -85,15 +85,14 @@ body.dark{background:#0b0f14!important;color:#e5e7eb}.dark .card,.dark .table-wr
 <div class="modal" id="scanPopup"><div class="modal-box"><div class="modal-head">📷 Scan Barcode Nota</div><div class="modal-body"><div id="reader"></div><div id="scanResult" style="margin-top:10px;font-size:11px;color:#047857;font-weight:900"></div></div><div class="modal-actions"><button class="btn secondary" onclick="tutupScan()">Tutup</button></div></div></div>
 <div class="modal" id="modal"><div class="modal-box"><div class="modal-head" id="modalTitle">FIXZY</div><div class="modal-body" id="modalBody"></div><div class="modal-actions" id="modalActions"></div></div></div>
 
-
 <script type="module">
-import{initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import{getAuth,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import{getFirestore,collection,query,where,getDocs,getDocsFromServer,doc,getDoc,updateDoc,deleteDoc,serverTimestamp,writeBatch} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import{initializeApp}from"https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import{getAuth,onAuthStateChanged}from"https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import{getFirestore,collection,query,where,getDocs,getDocsFromServer,doc,getDoc,updateDoc,deleteDoc,serverTimestamp,writeBatch}from"https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 const firebaseConfig={apiKey:"AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",authDomain:"fixzy-update.firebaseapp.com",projectId:"fixzy-update",storageBucket:"fixzy-update.firebasestorage.app",messagingSenderId:"995892519622",appId:"1:995892519622:web:fa41047944d8e5b35d6dc7"};
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$ = id=>document.getElementById(id);
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 
-// ===== FIXZY SYNC CORE v2 - 30 Sep 2026 =====
+// ===== FIXZY SYNC CORE FINAL v3 - Cirebon =====
 function roleNorm(v){return String(v||"").trim().toLowerCase();}
 function isSuperAdminEmail(email){return String(email||"").toLowerCase()==="servicehpmaja@gmail.com";}
 function resolveBusinessUid(profile,user){
@@ -106,7 +105,7 @@ function resolveBusinessUid(profile,user){
 }
 function mergeDocsById(arr1, arr2){
   const map=new Map();
-  [...arr1, ...arr2].forEach(d=>{ if(!map.has(d.id)) map.set(d.id,d); });
+  [...arr1, ...arr2].forEach(d=>{ if(d.id && !map.has(d.id)) map.set(d.id,d); });
   return [...map.values()];
 }
 
@@ -115,117 +114,490 @@ let ownerUid="",uid="",role="",isOwner=false,isSuperAdmin=false,all=[],filtered=
 const pname=d=>d.pelanggan?.nama||d.namaPelanggan||d.nama||"-";
 const phone=d=>d.noHp||d.noWhatsapp||d.whatsapp||d.pelanggan?.wa||d.hp||d.nomorWa||d.wa||"-";
 const total=d=>Number(d.total??d.totalBayar??0)||0,diskon=d=>Number(d.diskon??d.potongan??0)||0,dp=d=>Number(d.dp??d.uangMuka??0)||0;
-const sisa=d=>Number(d.sisa??Math.max(0,total(d)-diskon(d)-dp(d))||0),income=d=>Number(d.pendapatan??0);
-const date=d=>String(d.tanggal||d.date||"").slice(0,10);
-const st=d=>String(d.status||"").toLowerCase();
-const statusLabel=s=>({masuk:"Masuk",tagihan:"Tagihan",tunai:"Tunai",diambil:"Diambil",batal:"Batal"}[s]||s);
-const productText=d=>{let t=d.items||d.produk||d.rincian||d.namaProduk||""; if(Array.isArray(t)) return t.map(x=>x.nama||x.name||"").join(", "); return String(t);};
+const sisa=d=>Number(d.sisa??Math.max(0,total(d)-diskon(d)-dp(d)))||0;
+const date=d=>{let v=d.tanggal??d.tanggalPenjualan??d.createdAt??"";if(v&&typeof v==="object"&&v.toDate)v=v.toDate().toISOString();return String(v).slice(0,10)};
+const fmt=s=>{if(!s)return"-";let p=String(s).slice(0,10).split("-");return p.length===3?`${p[2]}-${p[1]}-${p[0]}`:s};
+const st=d=>String(d.status||"masuk").toLowerCase();
+function parseProduk(d){
+  const f=d.items||d.produkList||d.namaProduk||d.produk||d.barang||d.detailProduk;
+  if(!f)return{text:"-",detailText:"-",chips:'<span style="color:#94a3b8">-</span>',detailHtml:'<span style="color:#94a3b8">-</span>'};
 
-function modalUI(title,msg,btns){
-  $("modalTitle").textContent=title;
-  $("modalBody").innerHTML=`<div class="detail">${msg}</div>`;
-  const foot=$("modalFoot"); foot.innerHTML="";
-  (btns||[{label:"Tutup",fn:()=>closeModal()}]).forEach((b,i)=>{
-    const el=document.createElement("button"); el.className=i===0?"btn dark":"btn secondary"; el.textContent=b.label; el.onclick=()=>b.fn?.(); foot.appendChild(el);
-  });
-  $("modal").classList.add("show");
+  if(typeof f==="string"){
+    const text=f.trim()||"-";
+    return{
+      text,
+      detailText:text,
+      chips:`<span class="prod-chip">${esc(text)}</span>`,
+      detailHtml:`<div class="prod-line"><b>${esc(text)}</b></div>`
+    };
+  }
+
+  if(Array.isArray(f)){
+    const rows=f.map((i,idx)=>{
+      if(typeof i==="string"){
+        const n=i.trim()||"-";
+        return {nama:n,kode:"",qty:0,harga:0,subtotal:0,raw:n};
+      }
+      const nama=String(i.nama||i.namaProduk||i.produk||i.namaBarang||i.barang||i.name||i.kode||`Produk ${idx+1}`).trim();
+      let kode=String(i.kode||i.sku||i.barcode||"").trim();
+      // Jangan tampilkan nomor nota sebagai kode produk.
+      // Pada data lama, field barcode kadang berisi nomor nota.
+      const notaTransaksi=String(d.nomorNota||d.nota||"").trim().toLowerCase();
+      const barcodeTransaksi=String(d.barcode||"").trim().toLowerCase();
+      if(kode.toLowerCase()===notaTransaksi || kode.toLowerCase()===barcodeTransaksi) kode="";
+      const qty=Number(i.qty??i.jumlah??i.quantity??i.kuantitas??1)||1;
+      const harga=Number(i.harga??i.hargaJual??i.price??i.hargaSatuan??i.sellingPrice??0)||0;
+      const subtotal=Number(i.subtotal??i.total??(qty*harga))||0;
+      return {nama,kode,qty,harga,subtotal,raw:nama};
+    }).filter(x=>x.nama&&x.nama!=="-");
+
+    if(!rows.length)return{text:"-",detailText:"-",chips:'<span style="color:#94a3b8">-</span>',detailHtml:'<span style="color:#94a3b8">-</span>'};
+
+    const text=rows.map(x=>x.nama).join(", ");
+    const detailText=rows.map(x=>{
+      const kode=x.kode?` [${x.kode}]`:"";
+      const qtyText=x.qty?` x ${x.qty}`:"";
+      const hargaText=x.harga?` @ ${rupiah(x.harga)}`:"";
+      const subText=x.subtotal?` = ${rupiah(x.subtotal)}`:"";
+      return `${x.nama}${kode}${qtyText}${hargaText}${subText}`;
+    }).join("\n");
+
+    const detailHtml=rows.map(x=>{
+      const kode=x.kode?`<small class="prod-code">${esc(x.kode)}</small>`:"";
+      const qty=x.qty?`<span class="prod-qty">Qty ${x.qty}</span>`:"";
+      const harga=x.harga?`<span>${rupiah(x.harga)}/pcs</span>`:"";
+      const sub=x.subtotal?`<b>${rupiah(x.subtotal)}</b>`:"";
+      return `<div class="prod-detail-row"><div class="prod-detail-name"><b>${esc(x.nama)}</b>${kode}</div><div class="prod-detail-meta">${qty}${harga}${sub}</div></div>`;
+    }).join("");
+
+    const chips=rows.map(x=>{
+      const label=x.qty>1?`${x.nama} × ${x.qty}`:x.nama;
+      return `<span class="prod-chip">${esc(label)}</span>`;
+    }).join("");
+
+    return {text,detailText,chips,detailHtml};
+  }
+
+  return{text:"-",detailText:"-",chips:'<span style="color:#94a3b8">-</span>',detailHtml:'<span style="color:#94a3b8">-</span>'};
 }
+const productText=d=>parseProduk(d).text,productChips=d=>parseProduk(d).chips;
+const income=d=>{const x=st(d);const nilai=Math.max(0,total(d)-diskon(d));if(x==="batal")return 0;if(x==="tunai"||x==="diambil")return nilai;if(x==="masuk"||x==="tagihan")return Math.min(Math.max(0,dp(d)),nilai);return 0};
+const statusLabel=x=>x==="tunai"?"Tunai":x==="tagihan"?"Tagihan":x==="diambil"?"Diambil":x==="batal"?"Batal":"Masuk";
+function normalizePhone(v){let n=String(v||"").replace(/\D/g,"");if(!n)return"";if(n.startsWith("0"))n="62"+n.slice(1);else if(n.startsWith("8"))n="62"+n;return n}
+function modalUI(t,h,b){$("modalTitle").textContent=t;$("modalBody").innerHTML=h;$("modalActions").innerHTML=b.map((x,i)=>`<button class="btn ${x.cls||"secondary"}" data-i="${i}">${esc(x.label)}</button>`).join("");$("modal").classList.add("show");document.querySelectorAll("#modalActions button").forEach(x=>x.onclick=()=>b[+x.dataset.i].fn?.())}
 function closeModal(){$("modal").classList.remove("show")}
 
 async function loadSales(){
-  all=[]; if(!ownerUid) return;
+  all=[];
+  if(!ownerUid){
+    console.warn("ownerUid kosong, tidak bisa load");
+    render();
+    return;
+  }
   try{
     let a=[],b=[];
-    try{ const q1=query(collection(db,"penjualan"),where("ownerUid","==",ownerUid)); const s1=await getDocsFromServer(q1); a=s1.docs.map(d=>({id:d.id,...d.data()})); }catch(e){ console.warn("ownerUid query fail",e.message); }
-    try{ const q2=query(collection(db,"penjualan"),where("ownerId","==",ownerUid)); const s2=await getDocsFromServer(q2); b=s2.docs.map(d=>({id:d.id,...d.data()})); }catch(e){ console.warn("ownerId query fail",e.message); }
+    try{
+      const q1=query(collection(db,"penjualan"),where("ownerUid","==",ownerUid));
+      const s1=await getDocs(q1);
+      a=s1.docs.map(d=>({id:d.id,...d.data()}));
+    }catch(e){ console.warn("ownerUid query fail",e.message); }
+    try{
+      const q2=query(collection(db,"penjualan"),where("ownerId","==",ownerUid));
+      const s2=await getDocs(q2);
+      b=s2.docs.map(d=>({id:d.id,...d.data()}));
+    }catch(e){ console.warn("ownerId query fail",e.message); }
     all=mergeDocsById(a,b);
-  }catch(e){ console.warn("loadSales:",e.message); }
+    console.log("loadSales OK",all.length,"owner",ownerUid);
+  }catch(e){
+    console.warn("loadSales error:",e.message);
+  }
   render();
 }
 
-function apply(){
-  let f=$("from").value,q=$("search").value.trim().toLowerCase(),s=$("status").value;
-  filtered=all.filter(d=>{let dt=date(d),txt=[d.nomorNota,d.nota,d.barcode,pname(d),phone(d),productText(d)].join(" ").toLowerCase();return(!f||dt>=f)&&(!s||st(d)===s)&&(!q||txt.includes(q))});
+function apply(){let f=$("from").value,q=$("search").value.trim().toLowerCase(),s=$("status").value;filtered=all.filter(d=>{let dt=date(d),txt=[d.nomorNota,d.nota,d.barcode,pname(d),phone(d),productText(d)].join(" ").toLowerCase();return(!f||dt>=f)&&(!s||st(d)===s)&&(!q||txt.includes(q))})}
+function render(){apply();let valid=filtered.filter(d=>st(d)!=="batal"),nilai=valid.reduce((a,d)=>a+total(d),0),inc=filtered.reduce((a,d)=>a+income(d),0),tag=filtered.filter(d=>st(d)==="tagihan").reduce((a,d)=>a+sisa(d),0),tunai=filtered.filter(d=>st(d)==="tunai").length;
+$("summary").innerHTML=`💰 <b>${filtered.length} data penjualan</b> • Total nilai <b>${rupiah(nilai)}</b> • Pendapatan <b class="green">${rupiah(inc)}</b> • Tunai <b>${tunai}</b> • Sisa tagihan <b class="yellow">${rupiah(tag)}</b>`;
+$("tbody").innerHTML=filtered.map(d=>{let x=st(d);return`<tr><td>${esc(fmt(date(d)))}</td><td><b>${esc(d.nomorNota||d.nota||"-")}</b><br><span class="barcode">${esc(d.barcode||d.nomorNota||"-")}</span></td><td><b>${esc(pname(d))}</b><br><small>${esc(phone(d))}</small></td><td><div class="prod-detail">${parseProduk(d).detailHtml}</div></td><td>Total: ${rupiah(total(d))}<br>Diskon: ${rupiah(diskon(d))}<br>DP: ${rupiah(dp(d))}<br><b>Sisa: ${rupiah(sisa(d))}</b></td><td><b style="color:${income(d)>0?'#047857':'#94a3b8'}">${rupiah(income(d))}</b></td><td><span class="badge ${x}">${esc(statusLabel(x))}</span><br><br><div style="display:flex;gap:5px"><button class="mini" onclick="editStatus('${esc(d.id)}')">✏️ Status</button><button class="mini" style="background:#ffc107;color:#111827" onclick="editDataPenjualan('${esc(d.id)}')">📝 Edit Data</button>${isOwner?`<button class="mini" style="background:#dc2626;color:#fff" onclick="hapusPenjualan('${esc(d.id)}')">🗑️ Hapus</button>`:""}<button class="mini" style="background:#22c55e;color:#fff" onclick="openWA('${esc(d.id)}')">WA</button></div></td></tr>`}).join("")||'<tr><td colspan="7" style="text-align:center;padding:20px">Tidak ada data</td></tr>';
+$("sales").innerHTML=filtered.map(d=>{let x=st(d);return`<div class="sale"><div class="top"><b>${esc(d.nomorNota||d.nota||"-")}</b><span class="badge ${x}">${esc(statusLabel(x))}</span></div><div class="row"><span>📅 Tanggal</span><b>${esc(fmt(date(d)))}</b></div><div class="row"><span>👤 Pelanggan</span><b>${esc(pname(d))}<br><small>${esc(phone(d))}</small></b></div><div class="row" style="align-items:flex-start"><span>📦 Produk</span><div class="prod-detail">${parseProduk(d).detailHtml}</div></div><div class="row"><span>💰 Total</span><b>${rupiah(total(d))}</b></div><div class="row"><span>🧾 Sisa</span><b>${rupiah(sisa(d))}</b></div><div class="row"><span>📈 Pendapatan</span><b>${rupiah(income(d))}</b></div><div class="foot"><button class="mini" onclick="editStatus('${esc(d.id)}')">✏️ Status</button><button class="mini" style="background:#ffc107;color:#111827" onclick="editDataPenjualan('${esc(d.id)}')">📝 Edit Data</button>${isOwner?`<button class="mini" style="background:#dc2626;color:#fff" onclick="hapusPenjualan('${esc(d.id)}')">🗑️ Hapus</button>`:""}<button class="mini" style="background:#22c55e;color:#fff" onclick="openWA('${esc(d.id)}')">📲 WA</button></div></div>`}).join("")}
+function statusOptions(c){
+  return["tagihan","tunai","batal"].map(x=>`<option value="${x}" ${x===c?"selected":""}>${statusLabel(x)}</option>`).join("");
+}
+function getStockItems(d){
+  const f=d.items||d.produkList||d.namaProduk||d.produk||d.barang||d.detailProduk;
+  if(!Array.isArray(f))return[];
+  return f.map((i,idx)=>{
+    if(typeof i==="string")return null;
+    const productId=String(i.productId||i.stockId||i.stokId||i.idProduk||"").trim();
+    const nama=String(i.nama||i.namaProduk||i.produk||i.namaBarang||i.barang||i.name||`Produk ${idx+1}`).trim();
+    const qty=Math.max(0,Number(i.qty??i.jumlah??i.quantity??i.kuantitas??0)||0);
+    return productId&&qty>0?{productId,nama,qty}:null;
+  }).filter(Boolean);
 }
 
-function render(){
-  apply();
-  const tbody=$("tbody"), mobile=$("mobileList");
-  if(tbody){
-    tbody.innerHTML=filtered.map((d,i)=>`<tr>
-      <td>${i+1}</td><td>${date(d)}</td><td><b>${esc(d.nomorNota||d.nota||"")}</b><div class="barcode">${esc(d.barcode||"")}</div></td>
-      <td>${esc(pname(d))}<br><small>${esc(phone(d))}</small></td>
-      <td>${esc(productText(d)).slice(0,80)}</td>
-      <td>${rupiah(total(d))}</td><td>${rupiah(diskon(d))}</td><td>${rupiah(dp(d))}</td><td>${rupiah(sisa(d))}</td><td>${rupiah(income(d))}</td>
-      <td><span class="badge ${st(d)}">${statusLabel(st(d))}</span></td>
-      <td>${esc(d.teknisi||"")}</td><td>${esc(d.namaKonter||"")}</td>
-      <td><button class="mini" onclick="detailSale('${d.id}')">Lihat</button></td>
-    </tr>`).join("")||`<tr><td colspan="14" style="text-align:center;padding:20px">Tidak ada data</td></tr>`;
+async function updateStockForStatus(d,fromStatus,toStatus){
+  if(fromStatus===toStatus)return;
+
+  const fromBatal=fromStatus==="batal", toBatal=toStatus==="batal";
+  if(fromBatal===toBatal)return; // aktif -> aktif atau batal -> batal
+
+  const items=getStockItems(d);
+  if(!items.length){
+    // Data lama/import bisa tidak memiliki productId. Jangan mengubah stok
+    // secara tebakan berdasarkan nama agar stok tidak salah.
+    throw new Error("Stok tidak dapat diproses karena rincian produk pada nota tidak memiliki productId. Silakan gunakan data transaksi yang terhubung ke Stock Firebase.");
   }
-  if(mobile){
-    mobile.innerHTML=filtered.map(d=>`<div class="sale"><div class="top"><b>${esc(d.nomorNota||"")}</b><span class="badge ${st(d)}">${statusLabel(st(d))}</span></div><div class="row"><span>Tanggal</span><b>${date(d)}</b></div><div class="row"><span>Pelanggan</span><b>${esc(pname(d))}</b></div><div class="row"><span>Total</span><b>${rupiah(total(d))}</b></div><div class="row"><span>Sisa</span><b>${rupiah(sisa(d))}</b></div><div class="foot"><button class="mini" onclick="detailSale('${d.id}')">Detail</button></div></div>`).join("")||`<div class="sub">Tidak ada data</div>`;
+
+  // Gabungkan produk yang sama agar stok hanya diubah sekali.
+  const grouped=new Map();
+  items.forEach(x=>grouped.set(x.productId,(grouped.get(x.productId)||0)+x.qty));
+
+  // Semua READ selesai dahulu.
+  const reads=[];
+  for(const [productId,qty] of grouped){
+    const ref=doc(db,"stok",productId);
+    const snap=await getDoc(ref);
+    if(!snap.exists())throw new Error(`Produk stok ${productId} tidak ditemukan di Firebase.`);
+    const data=snap.data()||{};
+    const stockOwner=String(data.ownerUid||data.ownerId||"").trim();
+    if(stockOwner && stockOwner!==String(ownerUid||"").trim()){
+      throw new Error("Stok produk bukan milik Owner akun yang sedang login.");
+    }
+    const current=Math.max(0,Number(data.sisa??data.stok??data.stock??0)||0);
+    const next=toBatal?current+qty:current-qty;
+    if(next<0){
+      const nama=items.find(x=>x.productId===productId)?.nama||productId;
+      throw new Error(`Stok ${nama} tidak cukup untuk mengaktifkan kembali nota. Tersedia ${current}, diperlukan ${qty}.`);
+    }
+    reads.push({ref,data,current,next});
   }
-  if($("countLabel")) $("countLabel").textContent=`${filtered.length} / ${all.length} data`;
-  if($("summaryBox")){
-    let tunai=filtered.filter(d=>st(d)==="tunai").reduce((s,d)=>s+total(d)-diskon(d),0);
-    let tagihan=filtered.filter(d=>st(d)==="tagihan"||st(d)==="masuk").reduce((s,d)=>s+sisa(d),0);
-    $("summaryBox").innerHTML=`<b>${filtered.length}</b> data • <span class="green">Tunai: ${rupiah(tunai)}</span> • <span class="yellow">Tagihan: ${rupiah(tagihan)}</span> • Owner: ${ownerUid.slice(0,6)} • SYNC v2`;
-  }
+
+  // Semua WRITE dilakukan setelah seluruh READ selesai.
+  const batch=writeBatch(db);
+  reads.forEach(x=>{
+    const payload={
+      sisa:x.next,
+      stok:x.next,
+      status:x.next>0?"tersedia":"kosong",
+      updatedAt:serverTimestamp()
+    };
+    batch.update(x.ref,payload);
+  });
+  await batch.commit();
 }
 
-window.detailSale=async(id)=>{
-  const d=all.find(x=>x.id===id); if(!d) return;
-  modalUI("Detail "+esc(d.nomorNota||""),`
-    <div class="detail">
-      <b>Tanggal:</b> ${date(d)}<br>
-      <b>Nota:</b> ${esc(d.nomorNota||"")}<br>
-      <b>Pelanggan:</b> ${esc(pname(d))} - ${esc(phone(d))}<br>
-      <b>Produk:</b> ${esc(productText(d))}<br>
-      <b>Total:</b> ${rupiah(total(d))} - Diskon ${rupiah(diskon(d))} - DP ${rupiah(dp(d))} - Sisa ${rupiah(sisa(d))}<br>
-      <b>Status:</b> ${statusLabel(st(d))}<br>
-      <b>Teknisi:</b> ${esc(d.teknisi||"")}<br>
-      <b>Konter:</b> ${esc(d.namaKonter||"")}<br>
-      <b>Owner:</b> ${esc(d.ownerUid||"")}
-    </div>`,[{label:"Tutup",fn:closeModal}]);
-};
+function editStatus(id){
+  let d=all.find(x=>x.id===id);if(!d)return;
+  modalUI("Edit Status - "+(d.nomorNota||"-"),
+    `<div class="detail">Nota: <b>${esc(d.nomorNota||"-")}</b><br>Pelanggan: <b>${esc(pname(d))}</b> - ${esc(phone(d))}
+    <div style="margin-top:7px"><b>Detail Produk:</b><div class="prod-detail">${parseProduk(d).detailHtml}</div></div>
+    <br>Total: ${rupiah(total(d))}</div>
+    <label style="margin-top:12px">UBAH STATUS</label>
+    <select id="editStatus">${statusOptions(st(d))}</select>`,
+    [
+      {label:"Batal",fn:closeModal},
+      {label:"💾 Simpan & WA",cls:"dark",fn:async()=>{
+        const ns=$("editStatus").value, oldStatus=st(d);
+        const btns=document.querySelectorAll('#modalActions button');btns.forEach(b=>b.disabled=true);
+        try{
+          // Jika status menjadi BATAL, stok dikembalikan.
+          // Jika nota BATAL diaktifkan kembali, stok diambil lagi.
+          await updateStockForStatus(d,oldStatus,ns);
 
-window.hapusSale=async(id)=>{
-  if(!confirm("Hapus data ini dari Firebase?")) return;
-  try{
+          const nilai=Math.max(0,total(d)-diskon(d));
+          const pendapatan=ns==="tunai"
+            ?nilai
+            :ns==="tagihan"
+              ?Math.min(Math.max(0,dp(d)),nilai)
+              :0;
+
+          await updateDoc(doc(db,"penjualan",id),{
+            status:ns,
+            pendapatan,
+            sisa:Math.max(0,total(d)-diskon(d)-dp(d)),
+            ownerUid:ownerUid,
+            ownerId:ownerUid,
+            uid:uid,
+            updatedAt:serverTimestamp()
+          });
+
+          closeModal();
+          await loadSales();
+          render();
+          setTimeout(()=>openWA(id,ns),100);
+        }catch(e){
+          btns.forEach(b=>b.disabled=false);
+          modalUI("❌ Gagal mengubah status",esc(e.message||e),[{label:"Tutup",fn:closeModal}]);
+        }
+      }}
+    ]
+  );
+}
+
+function editDataPenjualan(id){
+ const d=all.find(x=>x.id===id);if(!d)return;
+ const produk=typeof d.items==="string"?d.items:productText(d),nota=d.nomorNota||d.nota||"";
+ modalUI("📝 Edit Semua Data Penjualan",`<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+ <div><label>TANGGAL</label><input id="edp_tanggal" type="date" value="${esc(date(d))}"></div>
+ <div><label>NOMOR NOTA</label><input id="edp_nota" value="${esc(nota)}"></div>
+ <div><label>BARCODE</label><input id="edp_barcode" value="${esc(d.barcode||nota)}"></div>
+ <div><label>NAMA PELANGGAN</label><input id="edp_nama" value="${esc(pname(d)==="-"?"":pname(d))}"></div>
+ <div><label>NO WHATSAPP / HP</label><input id="edp_wa" value="${esc(phone(d)==="-"?"":phone(d))}"></div>
+ <div><label>PRODUK</label><input id="edp_produk" value="${esc(produk==="-"?"":produk)}"></div>
+ <div><label>TOTAL</label><input id="edp_total" type="number" min="0" value="${Number(total(d))||0}"></div>
+ <div><label>DISKON</label><input id="edp_diskon" type="number" min="0" value="${Number(diskon(d))||0}"></div>
+ <div><label>DP</label><input id="edp_dp" type="number" min="0" value="${Number(dp(d))||0}"></div>
+ <div><label>TEKNISI / SALES</label><input id="edp_teknisi" value="${esc(d.teknisi||d.namaKaryawan||"")}"></div>
+ <div><label>KONTER</label><input id="edp_konter" value="${esc(d.namaKonter||d.konter||"")}"></div>
+ <div><label>AKUN / PEMBUAT</label><input id="edp_akun" value="${esc(d.akun||d.akunLogin||d.createdBy||"")}"></div>
+ </div><div class="detail" style="margin-top:10px">Status tetap diedit lewat tombol <b>✏️ Status</b>.</div>`,[
+ {label:"Batal",fn:closeModal},
+ {label:"💾 Simpan Data",cls:"dark",fn:async()=>{
+   const nt=Math.max(0,Number($("edp_total").value)||0),nd=Math.max(0,Number($("edp_diskon").value)||0),ndp=Math.max(0,Number($("edp_dp").value)||0);
+   const btns=document.querySelectorAll('#modalActions button');btns.forEach(b=>b.disabled=true);
+   try{
     const ref=doc(db,"penjualan",id),snap=await getDoc(ref);
-    if(!snap.exists()) throw Error("Data tidak ditemukan");
-    const cur=snap.data()||{}; if(String(cur.ownerUid||cur.ownerId||"")!==ownerUid) throw Error("Bukan milik owner aktif");
-    await deleteDoc(ref); await loadSales(); render();
-  }catch(e){ alert("Gagal hapus: "+e.message); }
+    if(!snap.exists())throw new Error("Data penjualan tidak ditemukan di Firebase.");
+    const current=snap.data()||{},keepOwner=String(current.ownerUid||"").trim();
+    if(!keepOwner||keepOwner!==String(ownerUid||"").trim())throw new Error("Data bukan milik akun yang sedang login.");
+    const newNota=$("edp_nota").value.trim()||nota,wa=$("edp_wa").value.trim();
+    const patch={tanggal:$("edp_tanggal").value||date(current),nomorNota:newNota,nota:newNota,barcode:$("edp_barcode").value.trim(),namaPelanggan:$("edp_nama").value.trim()||"-",noHp:wa,noWhatsapp:wa,wa,items:$("edp_produk").value.trim(),total:nt,diskon:nd,dp:ndp,sisa:Math.max(0,nt-nd-ndp),pendapatan:(st(current)==="tunai"?Math.max(0,nt-nd):(st(current)==="masuk"||st(current)==="tagihan")?Math.min(ndp,Math.max(0,nt-nd)):0),teknisi:$("edp_teknisi").value.trim(),namaKonter:$("edp_konter").value.trim(),akun:$("edp_akun").value.trim(),updatedAt:serverTimestamp()};
+    if(current.pelanggan&&typeof current.pelanggan==='object')patch.pelanggan={...current.pelanggan,nama:$("edp_nama").value.trim()||"-",wa};
+    await updateDoc(ref,patch);
+    const verify=await getDoc(ref);if(!verify.exists())throw new Error("Dokumen tidak ditemukan setelah disimpan.");
+    const saved=verify.data()||{};
+    if(String(saved.ownerUid||"")!==keepOwner||String(saved.nomorNota||"")!==newNota||Number(saved.total||0)!==nt||Number(saved.dp||0)!==ndp)throw new Error("Hasil edit belum sesuai dengan data Firebase.");
+    closeModal();await loadSales();render();
+   }catch(e){btns.forEach(b=>b.disabled=false);modalUI("❌ Gagal menyimpan",esc(e.message||e),[{label:"Tutup",fn:closeModal}]);}
+ }}]);
+}
+async function hapusPenjualan(id){
+ if(!isOwner){modalUI("🔒 Akses ditolak","Akun ini tidak memiliki hak menghapus data penjualan.",[{label:"Tutup",fn:closeModal}]);return}
+ const d=all.find(x=>x.id===id);if(!d)return;
+ modalUI("⚠️ Hapus Data Penjualan",`<div class="detail">Yakin hapus nota <b>${esc(d.nomorNota||d.nota||id)}</b>?<br>Data akan dihapus permanen dari Firebase.</div>`,[
+ {label:"Batal",fn:closeModal},{label:"🗑️ Hapus Permanen",cls:"dark",fn:async()=>{try{await deleteDoc(doc(db,"penjualan",id));closeModal();await loadSales();render()}catch(e){modalUI("❌ Gagal menghapus",esc(e.message),[{label:"Tutup",fn:closeModal}])}}}
+ ]);
+}
+
+function waProductDetails(d){
+  const f=d.items||d.produkList||d.namaProduk||d.produk||d.barang||d.detailProduk;
+  if(!f)return"-";
+
+  if(typeof f==="string"){
+    const text=f.trim();
+    return text?`• ${text}`:"-";
+  }
+
+  if(Array.isArray(f)){
+    const rows=f.map((i,idx)=>{
+      if(typeof i==="string"){
+        const nama=i.trim()||`Produk ${idx+1}`;
+        return `• *${nama}*`;
+      }
+
+      const nama=String(i.nama||i.namaProduk||i.produk||i.namaBarang||i.barang||i.name||i.kode||`Produk ${idx+1}`).trim();
+      const kode=String(i.kode||i.sku||i.barcode||"").trim();
+      const nota=String(d.nomorNota||d.nota||"").trim().toLowerCase();
+      const barcodeTransaksi=String(d.barcode||"").trim().toLowerCase();
+      const kodeAman=(kode && kode.toLowerCase()!==nota && kode.toLowerCase()!==barcodeTransaksi)?kode:"";
+      const qty=Number(i.qty??i.jumlah??i.quantity??i.kuantitas??1)||1;
+      const harga=Number(i.harga??i.hargaJual??i.price??i.hargaSatuan??i.sellingPrice??0)||0;
+      const subtotal=Number(i.subtotal??i.total??(qty*harga))||0;
+
+      let line=`• *${nama}*`;
+      if(kodeAman)line+=`\n  Kode: ${kodeAman}`;
+      line+=`\n  Qty: ${qty}`;
+      if(harga)line+=` × ${rupiah(harga)}/pcs`;
+      if(subtotal)line+=` = *${rupiah(subtotal)}*`;
+      return line;
+    }).filter(Boolean);
+
+    return rows.join("\n")||"-";
+  }
+
+  return"-";
+}
+
+function waText(d,newStatus){
+  const x=newStatus||st(d);
+  const nama=pname(d),nota=d.nomorNota||d.nota||"-";
+  const produk=waProductDetails(d);
+  const tot=rupiah(total(d)),disc=rupiah(diskon(d)),dpv=rupiah(dp(d)),sisaV=rupiah(sisa(d));
+  const tgl=fmt(date(d)),konter=d.namaKonter||d.konter||"A Yudi Thea";
+
+  const rincian=`📦 *RINCIAN PESANAN:*\n\n${produk}`;
+
+  if(x==="tagihan")return`Halo Kak ${nama} 👋
+
+Ada tagihan penjualan di *${konter}* yang belum lunas:
+
+📄 Nota: *${nota}*
+📅 Tanggal: ${tgl}
+
+${rincian}
+
+━━━━━━━━━━━━━━
+💰 Total: *${tot}*
+🎁 Diskon: ${disc}
+💵 DP: ${dpv}
+🧾 *Sisa Tagihan: ${sisaV}*
+━━━━━━━━━━━━━━
+
+Mohon segera dilunasi ya Kak 🙏
+Jika sudah transfer, abaikan pesan ini.
+
+Terima kasih 🙏
+*${konter}*`;
+
+  if(x==="tunai")return`Halo Kak ${nama} 🙏
+
+Terima kasih sudah berbelanja di *${konter}* ❤️
+
+📄 Nota: *${nota}* • *LUNAS* ✅
+📅 Tanggal: ${tgl}
+
+${rincian}
+
+━━━━━━━━━━━━━━
+💰 Total Bayar: *${tot}*
+🎁 Diskon: ${disc}
+💵 Pembayaran: *LUNAS*
+━━━━━━━━━━━━━━
+
+Pembayaran sudah kami terima lunas.
+Semoga puas dengan produknya!
+
+Ditunggu kedatangannya kembali ya Kak 🙏
+
+*${konter}*`;
+
+  if(x==="masuk")return`Halo Kak ${nama} 👋
+
+Transaksi penjualan *${nota}* di *${konter}* tercatat sebagai *MASUK* 📝
+
+📅 Tanggal: ${tgl}
+
+${rincian}
+
+━━━━━━━━━━━━━━
+💰 Total: *${tot}*
+🎁 Diskon: ${disc}
+💵 DP: ${dpv}
+🧾 *Sisa: ${sisaV}*
+━━━━━━━━━━━━━━
+
+Kami proses dulu ya Kak.
+
+*${konter}*`;
+
+  if(x==="batal")return`Halo Kak ${nama} 🙏
+
+Transaksi penjualan *${nota}* di *${konter}* *DIBATALKAN* ❌
+
+📅 Tanggal: ${tgl}
+
+${rincian}
+
+━━━━━━━━━━━━━━
+💰 Total: *${tot}*
+🎁 Diskon: ${disc}
+💵 DP: ${dpv}
+━━━━━━━━━━━━━━
+
+Jika ada pertanyaan silakan hubungi kami.
+
+*${konter}*`;
+
+  return`Halo Kak ${nama} 👋
+
+Status transaksi *${nota}* di *${konter}* menjadi *${x.toUpperCase()}* ✅
+
+📅 Tanggal: ${tgl}
+
+${rincian}
+
+━━━━━━━━━━━━━━
+💰 Total: *${tot}*
+🎁 Diskon: ${disc}
+💵 DP: ${dpv}
+🧾 *Sisa: ${sisaV}*
+━━━━━━━━━━━━━━
+
+*${konter}*`;
+}
+function openWA(id,s){let d=all.find(x=>x.id===id);if(!d)return;let n=normalizePhone(phone(d));if(!n){modalUI("⚠️ WA kosong",`<div class="detail">No WA kosong untuk nota <b>${esc(d.nomorNota||"-")}</b></div>`,[{label:"Tutup",fn:closeModal}]);return}let u="https://wa.me/"+n+"?text="+encodeURIComponent(waText(d,s));try{let w=window.open(u,"_blank");if(!w)window.location.href=u}catch(e){window.location.href=u}}
+window.bukaScan=()=>{$("scanPopup").classList.add("show");$("scanResult").textContent="Menyalakan kamera...";html5Qr=new Html5Qrcode("reader");html5Qr.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:250}},t=>{$("scanResult").textContent="✅ Terdeteksi: "+t;$("search").value=t;render();setTimeout(tutupScan,1000)},()=>{}).catch(e=>$("scanResult").textContent="❌ Gagal buka kamera: "+e)}
+window.tutupScan=()=>{$("scanPopup").classList.remove("show");if(html5Qr){html5Qr.stop().then(()=>{html5Qr.clear();html5Qr=null}).catch(()=>{})}}
+window.editStatus=editStatus;window.editDataPenjualan=editDataPenjualan;window.hapusPenjualan=hapusPenjualan;window.openWA=openWA;window.render=render;
+["search","status","from"].forEach(id=>$(id).addEventListener(id==="search"?"input":"change",render));
+$("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});$("scanPopup").addEventListener("click",e=>{if(e.target.id==="scanPopup")tutupScan()});
+
+/* =========================
+   IMPORT EXCEL / CSV / GOOGLE SHEET
+   ========================= */
+const aliases={
+ tanggal:["tanggal","tgl","tanggal penjualan","date","created at","createdat"],
+ nota:["nomor nota","nota","no nota","no. nota","nomor","invoice","invoice no","kode nota"],
+ barcode:["barcode","kode barcode","kode"],
+ nama:["pelanggan","nama pelanggan","nama","customer","customer name"],
+ wa:["no whatsapp","nomor whatsapp","whatsapp","wa","no wa","nomor wa","telepon","no hp","no handphone","hp"],
+ produk:["produk","produk terjual","nama produk","items","item","barang","barang terjual","produk list"],
+ total:["total","total bayar","total penjualan","grand total","jumlah"],
+ diskon:["diskon","potongan"],
+ dp:["dp","uang muka","panjar","down payment"],
+ sisa:["sisa","sisa bayar","sisa tagihan","piutang"],
+ pendapatan:["pendapatan","income","pemasukan"],
+ status:["status","status transaksi","status penjualan"],
+ teknisi:["teknisi","sales","karyawan","nama karyawan"],
+ konter:["konter","nama konter","toko","nama toko"],
+ akun:["akun","akun login","email","created by","dibuat oleh"],
+ ownerUid:["owner uid","owneruid","owner id","ownerid","uid"]
 };
+function normKey(v){return String(v??"").toLowerCase().trim().replace(/[_\-./]+/g," ").replace(/\s+/g," ")}
+function findCol(headers,names){const hs=headers.map(normKey);for(const n of names){let i=hs.indexOf(normKey(n));if(i>=0)return headers[i]}for(const h of headers){let nh=normKey(h);for(const n of names){let nn=normKey(n);if(nn.length>=4&&(nh.includes(nn)||nn.includes(nh)))return h}}return null}
+function val(r,c){return c==null?"":r[c]}
+function numVal(v){if(typeof v==="number")return v;let s=String(v??"").trim();if(!s)return 0;s=s.replace(/rp/ig,"").replace(/\s/g,"");if(s.includes(",")&&s.includes(".")){if(s.lastIndexOf(",")>s.lastIndexOf("."))s=s.replace(/\./g,"").replace(",",".");else s=s.replace(/,/g,"")}else if(s.includes(","))s=s.replace(",",".");let n=Number(s.replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0}
+function normalizeDate(v){if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,10);if(typeof v==="number"){let d=XLSX.SSF.parse_date_code(v);if(d)return`${d.y}-${String(d.m).padStart(2,"0")}-${String(d.d).padStart(2,"0")}`}let s=String(v??"").trim();if(!s)return new Date().toISOString().slice(0,10);if(/^\d{4}-\d{1,2}-\d{1,2}/.test(s))return s.slice(0,10);let m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);if(m)return`${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`;return s.slice(0,10)}
+function normalizeStatus(v){let s=normKey(v);if(!s)return"masuk";if(s.includes("batal"))return"batal";if(s.includes("tagihan")||s.includes("tempo")||s.includes("piutang"))return"tagihan";if(s.includes("tunai")||s.includes("lunas")||s.includes("cash"))return"tunai";return"masuk"}
+function rowToPenjualan(row,headers){let c={};for(let k in aliases)c[k]=findCol(headers,aliases[k]);let nota=String(val(row,c.nota)||"").trim(),nama=String(val(row,c.nama)||"").trim(),wa=String(val(row,c.wa)||"").trim(),produk=String(val(row,c.produk)||"").trim(),tanggal=normalizeDate(val(row,c.tanggal)),status=normalizeStatus(val(row,c.status));let tot=numVal(val(row,c.total)),dis=numVal(val(row,c.diskon)),dpv=numVal(val(row,c.dp)),sis=val(row,c.sisa)===""?Math.max(0,tot-dis-dpv):numVal(val(row,c.sisa));let inc=val(row,c.pendapatan)===""?(status==="tunai"?Math.max(0,tot-dis):0):numVal(val(row,c.pendapatan));return{tanggal,nomorNota:nota||`IMPORT-${Date.now()}`,barcode:String(val(row,c.barcode)||nota||""),namaPelanggan:nama||"-",wa,noHp:wa,noWhatsapp:wa,total:tot,diskon:dis,dp:dpv,sisa:sis,pendapatan:inc,status,items:produk||"",teknisi:String(val(row,c.teknisi)||""),namaKonter:String(val(row,c.konter)||"")||"A Yudi Thea",akun:String(val(row,c.akun)||""),ownerUid,ownerId:ownerUid,uid,importedLegacy:true,importedFrom:"excel_or_google_sheet",importedAt:serverTimestamp(),updatedAt:serverTimestamp()}}
+function showImportPreview(){if(!importRows.length){$("importPreview").style.display="none";return}let h=importHeaders.slice(0,12),r=importRows.slice(0,100);$("importPreview").style.display="block";$("importPreview").innerHTML=`<table><thead><tr>${h.map(x=>`<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${r.map(x=>`<tr>${h.map(k=>`<td>${esc(x[k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`}
+function setImportButton(){$("importButton").disabled=!importRows.length||!uid}
+window.bukaImport=()=>{$("importPopup").classList.add("show");$("importResult").textContent="";$("importInfo").textContent="";$("importProgress").style.width="0%";setImportButton()}
+window.tutupImport=()=>{$("importPopup").classList.remove("show");$("importFile").value="";$("importSheet").innerHTML='<option value="">Pilih file dulu</option>';importRows=[];importHeaders=[];importWorkbook=null;$("importPreview").style.display="none";$("importResult").textContent="";$("importInfo").textContent="";$("importProgress").style.width="0%";setImportButton()}
+async function readSheet(index){if(!importWorkbook)return;let name=importWorkbook.SheetNames[index]||importWorkbook.SheetNames[0],ws=importWorkbook.Sheets[name],rows=XLSX.utils.sheet_to_json(ws,{defval:""});importRows=rows;importHeaders=rows.length?Object.keys(rows[0]):[];$("importInfo").textContent=rows.length?`✅ Sheet "${name}" • ${rows.length} baris • Preview maksimal 100 baris`:"❌ Sheet kosong";showImportPreview();setImportButton()}
+$("importFile").addEventListener("change",async e=>{let file=e.target.files?.[0];if(!file)return;try{$("importResult").textContent="⏳ Membaca file...";importWorkbook=XLSX.read(await file.arrayBuffer(),{type:"array",cellDates:true});$("importSheet").innerHTML=importWorkbook.SheetNames.map((n,i)=>`<option value="${i}">${esc(n)}</option>`).join("");await readSheet(0);$("importResult").textContent=""}catch(err){$("importResult").textContent="❌ File gagal dibaca: "+err.message;importRows=[];setImportButton()}})
+$("importSheet").addEventListener("change",()=>readSheet(Number($("importSheet").value)||0));
+window.jalankanImport=async()=>{if(!importRows.length||!uid)return;let btn=$("importButton");btn.disabled=true;$("importResult").textContent="⏳ Memeriksa data...";try{let existing=new Set(all.map(d=>String(d.nomorNota||d.nota||"").trim().toLowerCase()).filter(Boolean)),prepared=[],skip=0;for(const row of importRows){let r=rowToPenjualan(row,importHeaders),key=String(r.nomorNota).trim().toLowerCase();if(key&&existing.has(key)){skip++;continue}prepared.push(r);if(key)existing.add(key)}if(!prepared.length){$("importResult").textContent=`⚠️ Tidak ada data baru. ${skip} baris dilewati karena duplikat.`;btn.disabled=false;return}let done=0;for(let i=0;i<prepared.length;i+=450){let batch=writeBatch(db),chunk=prepared.slice(i,i+450);for(const r of chunk)batch.set(doc(collection(db,"penjualan")),r);await batch.commit();done+=chunk.length;$("importProgress").style.width=Math.round(done/prepared.length*100)+"%";$("importResult").textContent=`☁️ Mengirim ${done}/${prepared.length} data...`}await loadSales();render();$("importResult").textContent=`✅ Import selesai: ${prepared.length} data masuk. ${skip} data dilewati karena duplikat.`;btn.disabled=false}catch(e){$("importResult").textContent="❌ Import gagal: "+e.message;btn.disabled=false}}
+/* BACKUP */
+function backupRows(){return filtered.length?filtered:all}function backupItemsText(d){return productText(d)}function backupFileDate(){let n=new Date(),z=x=>String(x).padStart(2,"0");return`${n.getFullYear()}${z(n.getMonth()+1)}${z(n.getDate())}_${z(n.getHours())}${z(n.getMinutes())}`}
+window.backupExcel=()=>{try{let rows=backupRows();if(!rows.length){modalUI("⚠️ Backup kosong","Tidak ada data penjualan.",[{label:"Tutup",fn:closeModal}]);return}let data=rows.map((d,i)=>({"No":i+1,"Tanggal":date(d),"Nomor Nota":d.nomorNota||d.nota||"","Barcode":d.barcode||"","Pelanggan":pname(d),"No WhatsApp":phone(d),"Produk":backupItemsText(d),"Total":total(d),"Diskon":diskon(d),"DP":dp(d),"Sisa":sisa(d),"Pendapatan":income(d),"Status":statusLabel(st(d)),"Teknisi":d.teknisi||d.namaKaryawan||"","Konter":d.namaKonter||d.konter||"","Akun":d.akun||d.akunLogin||d.createdBy||"","Owner UID":d.ownerUid||d.ownerId||d.uid||""}));let ws=XLSX.utils.json_to_sheet(data),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Data Penjualan");XLSX.writeFile(wb,`backup-data-penjualan-${backupFileDate()}.xlsx`)}catch(e){modalUI("❌ Backup Excel gagal",esc(e.message),[{label:"Tutup",fn:closeModal}])}}
+window.backupPDF=()=>{try{let rows=backupRows();if(!rows.length){modalUI("⚠️ Backup kosong","Tidak ada data penjualan.",[{label:"Tutup",fn:closeModal}]);return}let{jsPDF}=window.jspdf,pdf=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});pdf.setFontSize(14);pdf.text("BACKUP DATA PENJUALAN FIXZY",14,14);pdf.setFontSize(8);pdf.text(`Owner: ${ownerUid} • Data: ${rows.length} • ${new Date().toLocaleString("id-ID")}`,14,20);pdf.autoTable({startY:25,head:[["No","Tanggal","Nota","Pelanggan","Produk","Total","Diskon","DP","Sisa","Pendapatan","Status"]],body:rows.map((d,i)=>[i+1,date(d),d.nomorNota||d.nota||"-",pname(d),backupItemsText(d),rupiah(total(d)),rupiah(diskon(d)),rupiah(dp(d)),rupiah(sisa(d)),rupiah(income(d)),statusLabel(st(d))]),styles:{fontSize:6,cellPadding:1.5,overflow:"linebreak"},headStyles:{fontSize:6},margin:{left:10,right:10}});pdf.save(`backup-data-penjualan-${backupFileDate()}.pdf`)}catch(e){modalUI("❌ Backup PDF gagal",esc(e.message),[{label:"Tutup",fn:closeModal}])}}
+
 
 onAuthStateChanged(auth,async u=>{
-  if(!u){ location.replace("login.html"); return; }
+  if(!u){location.replace("login.html");return}
   try{
     uid=u.uid;
-    const s=await getDoc(doc(db,"users",u.uid));
-    if(!s.exists()) throw Error("Profil tidak ditemukan");
-    const p=s.data()||{};
+    let s=await getDoc(doc(db,"users",u.uid));
+    if(!s.exists()) throw Error("Profil tidak ditemukan di users/"+u.uid);
+    let p=s.data()||{};
     role=String(p.role||"").toLowerCase();
     isOwner=role==="owner"||p.isOwner===true;
-    isSuperAdmin=role==="superadmin"||String(u.email||"").toLowerCase()==="servicehpmaja@gmail.com";
+    isSuperAdmin=role==="superadmin"||isSuperAdminEmail(u.email);
     ownerUid=resolveBusinessUid(p,u);
-    if(!ownerUid) throw Error("Owner UID tidak ditemukan - cek profile ownerUid/ownerId");
-    if($("accountLine")) $("accountLine").textContent=`${u.email} • ${p.role||"-"} • Owner: ${ownerUid.slice(0,6)} • SYNC v2`;
+    if(!ownerUid) throw Error("Owner UID kosong - cek field ownerUid/ownerId di profile");
+    if($("accountLine")) $("accountLine").textContent=`${u.email} • ${p.role||"-"} • Owner: ${ownerUid.slice(0,6)} • FINAL SYNC`;
+    console.log("Auth OK ownerUid",ownerUid);
     await loadSales();
+  }catch(e){
+    console.error("Auth error",e);
+    if($("loading")) $("loading").innerHTML=`<span style="color:#b42318">Gagal: ${esc(e.message)}<br><small>Cek console</small></span>`;
+  }finally{
     if($("loading")) $("loading").style.display="none";
     if($("page")) $("page").style.display="block";
-    render();
-  }catch(e){
-    if($("loading")) $("loading").innerHTML=`<span style="color:#b42318">Gagal: ${esc(e.message)}</span>`;
-    console.error(e);
+    try{render();}catch(_){}
   }
 });
 
-if($("from")) $("from").addEventListener("change",render);
-if($("search")) $("search").addEventListener("input",render);
-if($("status")) $("status").addEventListener("change",render);
 </script>
-
 <script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
 </html>
