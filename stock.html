@@ -109,399 +109,135 @@ table{width:100%;min-width:760px;border-collapse:collapse}th{padding:11px;backgr
 
 <div class="loading" id="loading"><div class="loader"><div class="spin"></div><b id="loadingText">Memuat...</b></div></div>
 
+
 <script type="module">
-import {initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import {getAuth,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import {getFirestore,doc,getDoc,setDoc,serverTimestamp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
-
-const firebaseConfig={
-  apiKey:"AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",
-  authDomain:"fixzy-update.firebaseapp.com",
-  projectId:"fixzy-update",
-  storageBucket:"fixzy-update.firebasestorage.app",
-  messagingSenderId:"995892519622",
-  appId:"1:995892519622:web:fa41047944d8e5b35d6dc7"
-};
+import{initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import{getAuth,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import{getFirestore,doc,getDoc,setDoc,serverTimestamp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+const firebaseConfig={apiKey:"AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",authDomain:"fixzy-update.firebaseapp.com",projectId:"fixzy-update",storageBucket:"fixzy-update.firebasestorage.app",messagingSenderId:"995892519622",appId:"1:995892519622:web:fa41047944d8e5b35d6dc7"};
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
+const $=id=>document.getElementById(id);
 
-// ================== FIXZY SYNC CORE - START ==================
-// Disinkronkan 30 Sep 2026 - Cirebon
 function roleNorm(v){return String(v||"").trim().toLowerCase();}
 function isSuperAdminEmail(email){return String(email||"").toLowerCase()==="servicehpmaja@gmail.com";}
 function resolveBusinessUid(profile,user){
-  const role=roleNorm(profile?.role);
-  const email=String(user?.email||"").toLowerCase();
-  const superAdmin = role==="superadmin" || role==="super_admin" || isSuperAdminEmail(email) || profile?.isSuperAdmin===true;
-  if(role==="owner" || profile?.isOwner===true || superAdmin){
-    // Owner & Superadmin pakai UID sendiri sebagai owner bisnis
+  const r=roleNorm(profile?.role);
+  const superAdm = r==="superadmin" || r==="super_admin" || isSuperAdminEmail(user?.email) || profile?.isSuperAdmin===true;
+  if(r==="owner" || profile?.isOwner===true || superAdm){
     return String(user?.uid||"").trim();
   }
-  // Karyawan: pakai ownerUid / ownerId dari profilnya
   return String(profile?.ownerUid||profile?.ownerId||"").trim();
 }
-function getBusinessUidForCurrent(){
-  const role=roleNorm(currentUser?.profileRole||currentUser?.role||"");
-  const superAdmin = role==="superadmin" || role==="super_admin" || isSuperAdminEmail(currentUser?.email||"");
-  if(role==="owner" || currentUser?.isOwner===true || superAdmin){
-    return String(currentUser?.uid||"").trim();
-  }
-  return String(currentUser?.businessOwnerUid||currentUser?.ownerUid||currentUser?.ownerId||"").trim();
-}
-function buildOwnerFields(businessUid, user){
-  return {
-    ownerUid: businessUid,
-    ownerId: businessUid,
-    businessUid: businessUid,
-    uid: businessUid, // kompatibilitas lama
-    createdBy: user?.email||"",
-    createdByUid: user?.uid||"",
-    updatedAt: (typeof serverTimestamp!=="undefined"?serverTimestamp():new Date().toISOString())
-  };
-}
-// ================== FIXZY SYNC CORE - END ==================
-;
-let uid=null,products=[];
 
-const $=id=>document.getElementById(id);
-const money=n=>"Rp "+Number(n||0).toLocaleString("id-ID");
-const clean=s=>String(s??"").trim().toLowerCase().replace(/[\s_\-()./]+/g,"");
-const num=s=>{
-  if(typeof s==="number")return s;
-  let x=String(s??"").trim().replace(/[^\d,.-]/g,"");
-  if(!x)return 0;
-  const dots=(x.match(/\./g)||[]).length;
-  const commas=(x.match(/,/g)||[]).length;
-  if(dots&&commas){
-    const lastDot=x.lastIndexOf(".");
-    const lastComma=x.lastIndexOf(",");
-    if(lastComma>lastDot){
-      const dec=x.length-lastComma-1;
-      x=dec<=2?x.replace(/\./g,"").replace(",","."):x.replace(/,/g,"").replace(/\./g,"");
-    }else{
-      const dec=x.length-lastDot-1;
-      x=dec<=2?x.replace(/,/g,""):x.replace(/,/g,"").replace(/\./g,"");
-    }
-  }else if(commas){
-    const parts=x.split(",");
-    x=parts.length===2 && parts[1].length<=2 ? x.replace(",",".") : x.replace(/,/g,"");
-  }else if(dots){
-    const parts=x.split(".");
-    x=parts.length===2 && parts[1].length<=2 ? x : x.replace(/\./g,"");
-  }
-  const n=parseFloat(x);
-  return Number.isFinite(n)?n:0;
-};
-function pick(o,keys){for(const k of keys){const v=o[clean(k)];if(v!==undefined&&String(v).trim()!=="")return v}return""}
-function showLoading(v,t="Memuat..."){$("loadingText").textContent=t;$("loading").classList.toggle("show",v)}
-function message(t,type="info"){$("msg").textContent=t;$("msg").className="msg show "+type}
-function parseCSV(text){
-  const out=[];let row=[],cell="",q=false;text=text.replace(/^\uFEFF/,"");
-  for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];
-    if(c==='"'){if(q&&n==='"'){cell+='"';i++}else q=!q}
-    else if(c===","&&!q){row.push(cell);cell=""}
-    else if((c==="\n"||c==="\r")&&!q){if(c==="\r"&&n==="\n")i++;row.push(cell);cell="";if(row.some(v=>String(v).trim()))out.push(row);row=[]}
-    else cell+=c;
-  }
-  if(cell!==""||row.length){row.push(cell);if(row.some(v=>String(v).trim()))out.push(row)}
-  return out;
-}
-function normalize(rows){
-  if(!rows.length)throw Error("Spreadsheet kosong.");
-  const h=rows[0].map(clean),data=[];
-  for(let i=1;i<rows.length;i++){
-    const r=rows[i],o={};h.forEach((k,j)=>o[k]=r[j]??"");
-    const nama=pick(o,["nama barang","nama produk","nama","produk","product","barang"]);
-    if(!nama)continue;
+let uid="",ownerUid="",businessOwnerUid="",products=[];
 
-    // Struktur Spreadsheet A Yudi:
-    // A = Barang/kode, B = Nama Barang, C = kosong,
-    // D = modal, E = jual, F = supplier, G = stock.
-    // Utamakan nama kolom; posisi kolom menjadi fallback agar
-    // harga tetap terbaca walaupun header CSV berubah sedikit.
-    const modalValue=pick(o,["modal","harga modal","harga beli","harga modal produk","hpp","harga pokok"]);
-    const jualValue=pick(o,["jual","harga jual","harga jual produk","harga penjualan"]);
-    const supplier=pick(o,["supplier","suplier","nama supplier","nama suplier","vendor"]);
-    const stokValue=pick(o,["stock","stok","sisa stok","sisa","jumlah stok"]);
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function money(n){return "Rp "+(Number(n)||0).toLocaleString("id-ID")}
+function message(t,type){const el=$("msg"); el.textContent=t; el.className="msg show "+(type||"info"); el.style.display="block";}
+function showLoading(on,txt){const el=document.querySelector(".loading"); if(!el) return; el.classList.toggle("show",!!on); if(txt) el.querySelector("div").textContent=txt;}
 
-    const modal=num(modalValue!==""?modalValue:(r[3]??""));
-    const jual=num(jualValue!==""?jualValue:(r[4]??""));
-    const stok=num(stokValue!==""?stokValue:(r[6]??""));
-    const kode=pick(o,["kode","sku","kode produk","id"]);
-    data.push({id:crypto.randomUUID(),kode,nama:String(nama).trim(),supplier:String(supplier||"").trim(),modal,jual,stok:Math.max(0,stok)});
-  }
-  if(!data.length)throw Error("Tidak ada produk yang dikenali. Pastikan ada kolom Nama Produk.");
-  return data;
-}
-function csvUrlFromSheet(url){
-  const u=new URL(url);
-  const host=u.hostname.toLowerCase();
-  if(!host.includes("docs.google.com")||!u.pathname.includes("/spreadsheets/"))return url;
-
-  const gid=u.searchParams.get("gid") ||
-    (url.match(/[?#&]gid=([^&#]+)/i)||[])[1] || "0";
-
-  // Link Publish to web: /spreadsheets/d/e/2PACX-.../pubhtml
-  const pub=u.pathname.match(/\/spreadsheets\/d\/e\/([^/]+)\/pub(?:html)?/i);
-  if(pub){
-    return `https://docs.google.com/spreadsheets/d/e/${pub[1]}/pub?gid=${encodeURIComponent(gid)}&single=true&output=csv`;
-  }
-
-  // Link spreadsheet biasa: /spreadsheets/d/FILE_ID/edit
-  const id=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/i);
-  if(id){
-    return `https://docs.google.com/spreadsheets/d/${id[1]}/export?format=csv&gid=${encodeURIComponent(gid)}`;
-  }
-
-  return url;
-}
-async function readSheet(url){
-  const csv=csvUrlFromSheet(url);
-  let res;
-  try{
-    res=await fetch(csv,{cache:"no-store"});
-  }catch(e){
-    throw Error("Tidak bisa mengakses Google Sheets. Pastikan link sudah Publish to web dan dapat dibuka tanpa login.");
-  }
-  if(!res.ok)throw Error("Google Sheets mengembalikan HTTP "+res.status);
-  const text=await res.text();
-  if(!text||text.trim().length<2)throw Error("Data spreadsheet kosong.");
-  if(/<html|<!doctype/i.test(text.slice(0,500))){
-    throw Error("Google tidak mengirim data CSV. Pastikan Spreadsheet sudah Publish to web.");
-  }
-  return normalize(parseCSV(text));
-}
-function getLinkInputs(){
-  return [...document.querySelectorAll("#linkRows .sheet-link")];
-}
-
-function addLinkRow(value=""){
-  const box=$("linkRows");
-  box.style.display="grid";
-
-  const row=document.createElement("div");
-  row.className="linkrow";
-
-  const wrap=document.createElement("div");
-  const num=document.createElement("div");
-  num.className="linknum";
-  num.textContent="Spreadsheet "+(box.children.length+1);
-
-  const input=document.createElement("input");
-  input.className="sheet-link";
-  input.type="url";
-  input.placeholder="Tempel link Google Sheets / link Publish CSV";
-  input.value=value||"";
-
-  wrap.appendChild(num);
-  wrap.appendChild(input);
-
-  const del=document.createElement("button");
-  del.className="link-remove";
-  del.type="button";
-  del.textContent="Hapus";
-  del.onclick=()=>{
-    row.remove();
-    renumberLinks();
-    if(!box.children.length)box.style.display="none";
-  };
-
-  row.appendChild(wrap);
-  row.appendChild(del);
-  box.appendChild(row);
-  renumberLinks();
-}
-
-function renumberLinks(){
-  [...document.querySelectorAll("#linkRows .linkrow")].forEach((row,i)=>{
-    const n=row.querySelector(".linknum");
-    if(n)n.textContent="Spreadsheet "+(i+1);
-  });
-}
-
-window.addLinkRow=addLinkRow;
-
-async function saveSpreadsheet(){
-  if(!uid){message("Belum login Firebase.","err");return}
-
-  const inputs=getLinkInputs();
-  const links=inputs.map(x=>x.value.trim()).filter(Boolean);
-
-  if(!links.length){
-    message("Belum ada link Spreadsheet. Tekan ＋ Tambah Link terlebih dahulu.","err");
-    return;
-  }
-
-  const invalid=links.find(x=>!/^https?:\/\//i.test(x));
-  if(invalid){
-    message("Ada link Spreadsheet yang tidak valid.","err");
-    return;
-  }
-
-  showLoading(true,"Menyimpan semua link...");
-  try{
-    // spreadsheetLinks adalah format baru multi-link.
-    // spreadsheetUrl tetap disimpan agar data lama tidak hilang.
-    await setDoc(
-      doc(db,"pengaturan_spreadsheet", (typeof ownerUid!=="undefined"&&ownerUid?ownerUid: (typeof businessOwnerUid!=="undefined"?businessOwnerUid:uid)) ) // SYNC,
-      {
-        uid,
-        spreadsheetLinks:links,
-        spreadsheetUrl:links[0],
-        updatedAt:serverTimestamp()
-      },
-      {merge:true}
-    );
-
-    message(
-      `${links.length} link Spreadsheet berhasil disimpan di Firebase.\n`+
-      "Semua produk dari link yang tersimpan akan dibaca saat Reload Data.",
-      "ok"
-    );
-
-    await loadSpreadsheet();
-  }catch(e){
-    message("Gagal menyimpan link:\n"+e.message,"err");
-  }finally{
-    showLoading(false);
-  }
+function getLinkInputs(){return [...document.querySelectorAll("#linkRows .linkrow input")];}
+window.addLinkRow=function(val=""){
+  const wrap=$("linkRows"); wrap.style.display="grid";
+  const div=document.createElement("div"); div.className="linkrow";
+  div.innerHTML=`<div><div class="linknum">Spreadsheet</div><input type="url" placeholder="https://docs.google.com/.../pub?output=csv"></div><button class="link-remove" onclick="this.parentElement.remove()">✕</button>`;
+  div.querySelector("input").value=val;
+  wrap.appendChild(div);
 }
 
 async function getSavedLinks(){
-  const snap=await getDoc(doc(db,"pengaturan_spreadsheet", (typeof ownerUid!=="undefined"&&ownerUid?ownerUid: (typeof businessOwnerUid!=="undefined"?businessOwnerUid:uid)) ) // SYNC);
-  if(!snap.exists())return [];
-
-  const d=snap.data()||{};
-  let links=Array.isArray(d.spreadsheetLinks)
-    ? d.spreadsheetLinks.map(x=>String(x||"").trim()).filter(Boolean)
-    : [];
-
-  // Kompatibilitas data lama: spreadsheetUrl tetap dibaca.
-  if(!links.length && d.spreadsheetUrl){
-    links=[String(d.spreadsheetUrl).trim()].filter(Boolean);
-  }
-
-  return [...new Set(links)];
+  if(!businessOwnerUid) return [];
+  try{
+    const snap=await getDoc(doc(db,"pengaturan_spreadsheet",businessOwnerUid));
+    if(!snap.exists()) return [];
+    const d=snap.data()||{};
+    let links=Array.isArray(d.spreadsheetLinks)?d.spreadsheetLinks.map(x=>String(x||"").trim()).filter(Boolean):[];
+    if(!links.length && d.spreadsheetUrl) links=[String(d.spreadsheetUrl).trim()].filter(Boolean);
+    return [...new Set(links)];
+  }catch(e){console.warn(e); return [];}
 }
 
-async function loadSpreadsheet(){
-  if(!uid){
-    $("listMsg").textContent="Menunggu login Firebase...";
-    return;
+async function readSheet(url){
+  // support csv publish link
+  let csvUrl=url.trim();
+  if(csvUrl.includes("/edit")) csvUrl=csvUrl.replace("/edit","/pub").split("?")[0]+"?output=csv";
+  if(!csvUrl.includes("output=csv") && csvUrl.includes("docs.google")) csvUrl+="?output=csv";
+  const res=await fetch(csvUrl);
+  if(!res.ok) throw new Error("Gagal fetch "+res.status);
+  const text=await res.text();
+  const lines=text.split("\n").filter(l=>l.trim());
+  if(!lines.length) return [];
+  const headers=lines[0].split(",").map(h=>h.replace(/"/g,"").trim().toLowerCase());
+  const idxNama=headers.findIndex(h=>h.includes("nama")||h.includes("produk"));
+  const idxSup=headers.findIndex(h=>h.includes("supplier")||h.includes("supl"));
+  const idxModal=headers.findIndex(h=>h.includes("modal")||h.includes("tunai")||h.includes("beli"));
+  const idxJual=headers.findIndex(h=>h.includes("jual")||h.includes("tempo"));
+  const idxStok=headers.findIndex(h=>h.includes("stok")||h.includes("stock"));
+  const idxKode=headers.findIndex(h=>h.includes("kode"));
+  const rows=[];
+  for(let i=1;i<lines.length;i++){
+    const cols=lines[i].split(",").map(c=>c.replace(/"/g,"").trim());
+    if(!cols[idxNama]) continue;
+    rows.push({nama:cols[idxNama]||"", supplier:cols[idxSup]||"", modal:cols[idxModal]||0, jual:cols[idxJual]||0, stok:cols[idxStok]||0, kode:cols[idxKode]||""});
   }
+  return rows;
+}
 
-  showLoading(true,"Membaca semua Spreadsheet...");
+window.saveSpreadsheet=async function(){
+  if(!businessOwnerUid){message("Login belum siap","err");return;}
+  const inputs=getLinkInputs(); const links=inputs.map(x=>x.value.trim()).filter(Boolean);
+  if(!links.length){message("Belum ada link","err");return;}
+  const invalid=links.find(x=>!/^https?:\/\//i.test(x)); if(invalid){message("Ada link tidak valid","err");return;}
+  showLoading(true,"Menyimpan...");
+  try{
+    await setDoc(doc(db,"pengaturan_spreadsheet",businessOwnerUid),{uid:businessOwnerUid, spreadsheetLinks:links, spreadsheetUrl:links[0], updatedAt:serverTimestamp()},{merge:true});
+    message(`${links.length} link berhasil disimpan (Owner: ${businessOwnerUid.slice(0,6)}) SYNC v2`,"ok");
+    await loadSpreadsheet();
+  }catch(e){message("Gagal menyimpan: "+e.message,"err");}finally{showLoading(false);}
+};
 
+window.loadSpreadsheet=async function(){
+  if(!businessOwnerUid){$("listMsg").textContent="Menunggu login...";return;}
+  showLoading(true,"Membaca spreadsheet...");
   try{
     const links=await getSavedLinks();
-
-    if(!links.length){
-      products=[];
-      render();
-      $("listMsg").textContent="Belum ada Spreadsheet yang dihubungkan.";
-      return;
-    }
-
-    // Tampilkan kembali link yang tersimpan.
-    $("linkRows").innerHTML="";
-    $("linkRows").style.display="grid";
-    links.forEach(link=>addLinkRow(link));
-
-    const results=[];
-    const errors=[];
-
+    if(!links.length){products=[];render();$("listMsg").textContent="Belum ada spreadsheet. Tambah link lalu SIMPAN.";return;}
+    $("linkRows").innerHTML=""; $("linkRows").style.display="grid"; links.forEach(l=>addLinkRow(l));
+    const results=[]; const errors=[];
     for(let i=0;i<links.length;i++){
-      try{
-        const rows=await readSheet(links[i]);
-
-        // Supplier tetap mengikuti kolom supplier dari masing-masing Spreadsheet.
-        // Jika suatu sheet tidak mengisi supplier, gunakan label sumber sheet.
-        const sourceLabel=`Spreadsheet ${i+1}`;
-
-        rows.forEach(p=>{
-          if(!p.supplier)p.supplier=sourceLabel;
-          p.sourceSpreadsheet=links[i];
-          p.sourceIndex=i+1;
-          results.push(p);
-        });
-      }catch(e){
-        errors.push(`Spreadsheet ${i+1}: ${e.message}`);
-      }
+      try{ const rows=await readSheet(links[i]); rows.forEach(p=>{p.sourceIndex=i+1; results.push(p);}); }catch(e){errors.push(`Sheet ${i+1}: ${e.message}`);}
     }
-
-    products=results;
-    render();
-
-    if(errors.length){
-      $("listMsg").textContent=
-        `Berhasil membaca ${results.length} produk dari ${links.length} Spreadsheet, `+
-        `tetapi ada ${errors.length} link yang gagal dibaca.\n`+
-        errors.join("\n");
-      message(
-        "Sebagian Spreadsheet gagal dibaca:\n"+errors.join("\n")+
-        "\n\nPastikan setiap Spreadsheet sudah dipublish sebagai CSV dan dapat dibuka tanpa login.",
-        "err"
-      );
-    }else{
-      $("listMsg").textContent=
-        `Semua ${links.length} Spreadsheet berhasil dibaca. `+
-        `${results.length} produk digabung dalam satu daftar. `+
-        "Data tetap dibaca langsung dari Spreadsheet.";
-    }
-  }catch(e){
-    products=[];
-    render();
-    $("listMsg").textContent="Gagal membaca Spreadsheet: "+e.message;
-    message("Gagal membaca data:\n"+e.message,"err");
-  }finally{
-    showLoading(false);
-  }
-}
+    products=results; render();
+    if(errors.length) $("listMsg").textContent=`${results.length} produk, ${errors.length} gagal: ${errors.join("; ")}`;
+    else $("listMsg").textContent=`Semua ${links.length} spreadsheet berhasil dibaca. ${results.length} produk. SYNC v2 - Owner: ${businessOwnerUid.slice(0,6)}`;
+  }catch(e){$("listMsg").textContent="Gagal: "+e.message; message(e.message,"err");}finally{showLoading(false);}
+};
 
 function render(){
   const q=$("search").value.toLowerCase().trim();
   const arr=products.filter(p=>[p.nama,p.supplier,p.kode].join(" ").toLowerCase().includes(q));
   $("count").textContent=`${arr.length} produk`;
-  $("tbody").innerHTML=arr.map(rowHTML).join("")||'<tr><td colspan="5" style="text-align:center;padding:25px;color:#777">Tidak ada produk.</td></tr>';
-  $("mobileList").innerHTML=arr.map(mobileHTML).join("")||'<div class="sub">Tidak ada produk.</div>';
+  $("tbody").innerHTML=arr.map(p=>`<tr><td><b>${esc(p.nama)}</b><div style="font-size:9px;color:#94a3b8">${esc(p.kode||"")}</div></td><td class="supplier">${esc(p.supplier||"-")}</td><td class="price">${money(p.modal)}</td><td class="price">${money(p.jual)}</td><td>${p.stok}</td></tr>`).join("")||'<tr><td colspan="5" style="text-align:center;padding:25px">Tidak ada produk</td></tr>';
+  $("mobileList").innerHTML=arr.map(p=>`<div class="m-card"><div class="m-name">${esc(p.nama)}</div><div style="font-size:9px;color:#94a3b8">${esc(p.supplier||"-")}</div><div class="m-grid"><div><b>Tunai</b><span class="price">${money(p.modal)}</span></div><div><b>Tempo</b><span class="price">${money(p.jual)}</span></div><div><b>Stok</b>${p.stok}</div><div><b>Kode</b>${esc(p.kode||"-")}</div></div></div>`).join("");
 }
-function rowHTML(p){
-  return `<tr>
-    <td><b>${esc(p.nama)}</b><div style="font-size:9px;color:#94a3b8">${esc(p.kode||"")}</div></td>
-    <td class="supplier">${esc(p.supplier||"-")}</td>
-    <td class="price">${money(p.modal)}</td>
-    <td class="price">${money(p.jual)}</td>
-    <td>${p.stok}</td>
-  </tr>`;
-}
-function mobileHTML(p){
-  return `<div class="m-card">
-    <div class="m-name">${esc(p.nama)}</div><div style="font-size:9px;color:#94a3b8">${esc(p.supplier||"-")}</div>
-    <div class="m-grid"><div><b>Harga Tunai</b><span class="price">${money(p.modal)}</span></div><div><b>Harga Tempo</b><span class="price">${money(p.jual)}</span></div><div><b>Stok</b>${p.stok}</div><div><b>Kode</b>${esc(p.kode||"-")}</div></div>
-  </div>`;
-}
-function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
 $("search").addEventListener("input",render);
-let ownerUid=""; let businessOwnerUid="";
+
 onAuthStateChanged(auth,async user=>{
-  if(!user){
-    message("Session akun FIXZY belum aktif. Halaman ini tidak meminta login ulang. Buka Halaman 1 dari aplikasi FIXZY yang sudah login.","err");
-    return;
-  }
-  uid=user.uid; let s=await getDoc(doc(db,"users",uid)); let p=s.exists()?s.data():{}; ownerUid=resolveBusinessUid(p,user); businessOwnerUid=ownerUid; // SYNC
-  const akunInfo=user.email ? `Akun aktif: ${user.email}` : `Akun aktif: ${user.uid}`;
-  $("saved").style.display="block";
-  $("saved").textContent=akunInfo;
-  const links=await getSavedLinks().catch(()=> []);
-  if(links.length){
-    $("linkRows").innerHTML="";
-    $("linkRows").style.display="grid";
-    links.forEach(link=>addLinkRow(link));
+  if(!user){message("Session belum aktif. Buka dari index.html yang sudah login","err");return;}
+  uid=user.uid;
+  try{
+    const snap=await getDoc(doc(db,"users",uid));
+    const p=snap.exists()?snap.data():{};
+    ownerUid=resolveBusinessUid(p,user);
+    businessOwnerUid=ownerUid;
+    if(!businessOwnerUid) throw new Error("Owner UID tidak ditemukan");
     $("saved").style.display="block";
-    $("saved").textContent=`${links.length} Spreadsheet tersimpan`;
-    loadSpreadsheet();
-  }
+    $("saved").textContent=`Akun: ${user.email} • Owner: ${businessOwnerUid.slice(0,6)} • SYNC v2`;
+    const links=await getSavedLinks();
+    if(links.length){$("linkRows").innerHTML="";$("linkRows").style.display="grid";links.forEach(l=>addLinkRow(l));$("saved").textContent=`${links.length} spreadsheet tersimpan • Owner ${businessOwnerUid.slice(0,6)}`; loadSpreadsheet();}
+  }catch(e){message("Gagal load profile: "+e.message,"err");}
 });
-window.saveSpreadsheet=saveSpreadsheet;window.loadSpreadsheet=loadSpreadsheet;
 </script>
 <script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
 </html>
