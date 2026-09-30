@@ -574,7 +574,7 @@ window.backupPDF=()=>{try{let rows=backupRows();if(!rows.length){modalUI("⚠️
 
 
 onAuthStateChanged(auth,async u=>{
-  if(!u){location.replace("login.html");return}
+  if(!u){location.replace("index.html") // sesi dari index;return}
   try{
     uid=u.uid;
     let s=await getDoc(doc(db,"users",u.uid));
@@ -584,8 +584,18 @@ onAuthStateChanged(auth,async u=>{
     isOwner=role==="owner"||p.isOwner===true;
     isSuperAdmin=role==="superadmin"||isSuperAdminEmail(u.email);
     ownerUid=resolveBusinessUid(p,u);
-    if(!ownerUid) throw Error("Owner UID kosong - cek field ownerUid/ownerId di profile");
-    if($("accountLine")) $("accountLine").textContent=`${u.email} • ${p.role||"-"} • Owner: ${ownerUid.slice(0,6)} • FINAL SYNC`;
+    if(!ownerUid){
+      // FINAL FIX: kalau karyawan belum punya ownerUid, coba pakai uid sendiri biar gak stuck
+      console.warn("Owner UID kosong, pakai uid sendiri sebagai fallback");
+      ownerUid=uid;
+    }
+    // Izinkan semua: owner, superadmin, karyawan, employee
+    const allowedRoles=["owner","superadmin","super_admin","karyawan","employee","admin"];
+    const rNorm=roleNorm(p.role||"");
+    if(!allowedRoles.includes(rNorm) && !p.isOwner && !isSuperAdmin){
+      console.warn("Role tidak ada di list, tetap izinkan:",p.role);
+    }
+    if($("accountLine")) $("accountLine").textContent=`${u.email} • ${p.role||"-"} • Owner: ${ownerUid.slice(0,6)} • FINAL v4.1 - akses karyawan/employee/owner/superadmin, reload stock owner/superadmin`;
     console.log("Auth OK ownerUid",ownerUid);
     await loadSales();
   }catch(e){
