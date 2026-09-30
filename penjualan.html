@@ -634,60 +634,35 @@ body.dark #konterAlertModal div[style*="background:#111827"]{
 }
 </style>
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC_PcarMTT5Un7qfSLzf92o5OGn5rginsI",
   authDomain: "fixzy-update.firebaseapp.com",
   projectId: "fixzy-update",
-  storageBucket: "fixzy-update.appspot.com",
-  messagingSenderId: "431404655232",
-  appId: "1:431404655232:web:5f7d9c9a1b2c3d4e5f6a7"
+  storageBucket: "fixzy-update.firebasestorage.app",
+  messagingSenderId: "995892519622",
+  appId: "1:995892519622:web:fa41047944d8e5b35d6dc7"
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ================== FIXZY SYNC CORE - START ==================
-// Disinkronkan 30 Sep 2026 - Cirebon
+let currentUser=null, ownerUid=null, isOwner=false, allProduk=[], konterName="", karyawanList=[], rincianItems=[];
+
 function roleNorm(v){return String(v||"").trim().toLowerCase();}
 function isSuperAdminEmail(email){return String(email||"").toLowerCase()==="servicehpmaja@gmail.com";}
-function resolveBusinessUid(profile,user){
-  const role=roleNorm(profile?.role);
-  const email=String(user?.email||"").toLowerCase();
-  const superAdmin = role==="superadmin" || role==="super_admin" || isSuperAdminEmail(email) || profile?.isSuperAdmin===true;
-  if(role==="owner" || profile?.isOwner===true || superAdmin){
-    // Owner & Superadmin pakai UID sendiri sebagai owner bisnis
-    return String(user?.uid||"").trim();
-  }
-  // Karyawan: pakai ownerUid / ownerId dari profilnya
-  return String(profile?.ownerUid||profile?.ownerId||"").trim();
-}
-function getBusinessUidForCurrent(){
-  const role=roleNorm(currentUser?.profileRole||currentUser?.role||"");
-  const superAdmin = role==="superadmin" || role==="super_admin" || isSuperAdminEmail(currentUser?.email||"");
-  if(role==="owner" || currentUser?.isOwner===true || superAdmin){
-    return String(currentUser?.uid||"").trim();
-  }
-  return String(currentUser?.businessOwnerUid||currentUser?.ownerUid||currentUser?.ownerId||"").trim();
-}
-function buildOwnerFields(businessUid, user){
-  return {
-    ownerUid: businessUid,
-    ownerId: businessUid,
-    businessUid: businessUid,
-    uid: businessUid, // kompatibilitas lama
-    createdBy: user?.email||"",
-    createdByUid: user?.uid||"",
-    updatedAt: (typeof serverTimestamp!=="undefined"?serverTimestamp():new Date().toISOString())
-  };
-}
-// ================== FIXZY SYNC CORE - END ==================
 
+function getBusinessUid(){
+  if(!currentUser) return ownerUid||"";
+  const role=roleNorm(currentUser.profileRole||currentUser.role||"");
+  const superAdm=role==="superadmin" || isSuperAdminEmail(currentUser.email);
+  if(role==="owner" || currentUser.isOwner===true || superAdm) return String(currentUser.uid||"").trim();
+  return String(currentUser.businessOwnerUid||currentUser.ownerUid||ownerUid||"").trim();
+}
 
-let currentUser=null, ownerUid=null, isOwner=false, allProduk=[], konterName="", karyawanList=[], rincianItems=[];
 
 // =========================================================
 // SESI AKUN — ACUAN servisan.html
@@ -697,14 +672,7 @@ let currentUser=null, ownerUid=null, isOwner=false, allProduk=[], konterName="",
 // KARYAWAN   -> ownerUid/ownerId pada profil karyawan
 // =========================================================
 function roleNorm(v){return String(v||"").trim().toLowerCase();}
-function resolveBusinessUid(profile,user){
-  const role=roleNorm(profile?.role);
-  if(role==="owner" || profile?.isOwner===true){
-    return String(user.uid||"").trim();
-  }
-  if(role==="superadmin" || role==="super_admin") return "";
-  return String(profile?.ownerUid||profile?.ownerId||"").trim();
-}
+
 
 onAuthStateChanged(auth, async u=>{
   const akun=document.getElementById('akunSide');
@@ -1205,15 +1173,15 @@ async function simpanData(cetakMode){
       createdBy:currentUser.email,
       uid:ownerUid,
       ownerId:ownerUid,
-      businessUid:ownerUid, // SYNC
+      businessUid:ownerUid,
       uid:ownerUid,
       ownerId:ownerUid,
       ownerId:ownerUid,
-      businessUid:ownerUid, // SYNC
+      businessUid:ownerUid,
       uid:ownerUid,
       ownerUid:ownerUid,
       ownerId:ownerUid,
-      businessUid:ownerUid, // SYNC
+      businessUid:ownerUid,
       uid:ownerUid,
       createdAt:serverTimestamp(),
       updatedAt:new Date().toISOString()
